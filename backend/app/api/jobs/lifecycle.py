@@ -18,6 +18,7 @@ from app.tasks.run_job import run_job
 router = APIRouter()
 
 
+@router.post("")
 async def request_job(
     req: JobRequest,
     user: User = Depends(require("job.request")),
@@ -109,6 +110,7 @@ async def request_job(
     return {"id": job.id, "status": job.status, "mode": job.mode}
 
 
+@router.post("/{job_id}/approve")
 async def approve_job(
     job_id: int,
     req: ApproveRequest,
@@ -137,6 +139,7 @@ async def approve_job(
     return {"id": job.id, "status": job.status}
 
 
+@router.post("/{job_id}/reject")
 async def reject_job(
     job_id: int,
     user: User = Depends(require("job.approve")),
@@ -155,6 +158,7 @@ async def reject_job(
     return {"id": job.id, "status": job.status}
 
 
+@router.post("/{job_id}/cancel")
 async def cancel_job(
     job_id: int,
     user: User = Depends(require("job.cancel")),
