@@ -1,17 +1,21 @@
 import redis.asyncio as aioredis
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from git import Repo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import require
-from app.api.jobs.schemas import ApproveRequest, JobRequest
+from app.api.jobs.schemas import ApproveRequest, JobRequest, RelaunchRequest
 from app.core.config import settings
-from app.db.models import Credential, Inventory, JobMode, JobRun, JobStatus, JobTemplate, Playbook, Project, User
+from app.db.models import Credential, Inventory, JobEvent, JobMode, JobRun, JobStatus, JobTemplate, Playbook, Project, User
 from app.db.session import get_db
 from app.services.approvals import approve_job_run, freeze_params_snapshot
 from app.services.audit import audit
 from app.services.content import get_inventory_repo_path, get_project_repo_path
+from app.services.credentials import encrypt_payload
+from app.services.surveys import apply_survey
+from app.services.job_events import RELEVANT_EVENTS, build_host_summary
 from app.tasks.run_job import run_job
 
 
@@ -33,9 +37,10 @@ async def request_job(
         raise HTTPException(status_code=404, detail={"code": "inventory_not_found", "message": "Inventory not found"})
 
     if req.credential_ids:
-        named = (await db.execute(select(Credential.name).where(Credential.id.in_(req.credential_ids), Credential.username.isnot(None)))).scalars().all()
-        if len(named) > 1:
-            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set a username", "credentials": named})
+        rows = (await db.execute(select(Credential.name, Credential.username).where(Credential.id.in_(req.credential_ids), Credential.username.isnot(None)))).all()
+        usernames = {username for _, username in rows}
+        if len(usernames) > 1:
+            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set different usernames", "credentials": [name for name, _ in rows]})
 
     project = (await db.execute(select(Project).where(Project.id == playbook.project_id))).scalar_one_or_none()
     repo_path = get_project_repo_path(project.name)
@@ -59,6 +64,7 @@ async def request_job(
             raise HTTPException(status_code=409, detail={"code": "template_busy", "message": "Template has a queued/running live run"})
 
     requires_appr = True
+    tmpl = None
     if req.template_id:
         tmpl = (await db.execute(select(JobTemplate).where(JobTemplate.id == req.template_id))).scalar_one_or_none()
         if tmpl:
@@ -67,6 +73,14 @@ async def request_job(
     mode_status = JobStatus.pending_approval
     if req.mode == JobMode.check or not requires_appr:
         mode_status = JobStatus.queued
+    extra_vars = req.extra_vars
+    secret_vars = {}
+    if tmpl and tmpl.survey_spec:
+        try:
+            plain_vars, secret_vars = apply_survey(tmpl.survey_spec, req.survey_answers)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail={"code": str(e), "message": str(e)})
+        extra_vars = {**(tmpl.extra_vars or {}), **plain_vars, **req.extra_vars}
 
     snapshot = freeze_params_snapshot(
         project_git_path=str(repo_path),
@@ -76,12 +90,13 @@ async def request_job(
         limit=req.limit,
         tags=req.tags,
         skip_tags=req.skip_tags,
-        extra_vars=req.extra_vars,
+        extra_vars={**extra_vars, **{k: "$encrypted$" for k in secret_vars}},
         verbosity=req.verbosity,
         forks=req.forks,
         become=req.become,
         become_user=req.become_user,
         become_method=req.become_method,
+        diff=req.diff,
         credential_ids=req.credential_ids,
         git_sha=git_sha,
         inventory_git_sha=inventory_git_sha,
@@ -94,19 +109,65 @@ async def request_job(
         mode=req.mode,
         status=mode_status,
         requested_by=user.id,
-        params_snapshot=snapshot
+        params_snapshot=snapshot,
+        survey_secrets_enc=encrypt_payload(json.dumps(secret_vars)) if secret_vars else None
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
     await audit(db, "job_requested", actor_user_id=user.id, object_type="job_run", object_id=job.id, detail={"mode": req.mode})
+    if mode_status == JobStatus.pending_approval:
+        from app.tasks.notify import send_notification
+        send_notification.delay("approval_needed", {"event": "approval_needed", "job_id": job.id, "mode": job.mode.value, "template_id": job.template_id, "requested_by": user.id})
 
     if mode_status == JobStatus.queued:
         task = run_job.delay(job.id)
         job.celery_task_id = task.id
         await db.commit()
 
+    return {"id": job.id, "status": job.status, "mode": job.mode}
+
+@router.post("/{job_id}/relaunch")
+async def relaunch_job(
+    job_id: int,
+    req: RelaunchRequest,
+    user: User = Depends(require("job.request")),
+    db: AsyncSession = Depends(get_db)
+):
+    source = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
+    if source.status not in {JobStatus.successful, JobStatus.failed, JobStatus.canceled, JobStatus.timed_out}:
+        raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Source run has not finished"})
+    snapshot = dict(source.params_snapshot or {})
+    mode = req.mode or source.mode
+    if req.hosts == "failed":
+        rows = (await db.execute(select(JobEvent.counter, JobEvent.event, JobEvent.host, JobEvent.payload).where(JobEvent.job_run_id == source.id, JobEvent.event.in_(RELEVANT_EVENTS)).order_by(JobEvent.counter.asc()))).all()
+        failed_hosts = [h["host"] for h in build_host_summary(rows)["hosts"] if h["status"] in {"failed", "unreachable"}]
+        if not failed_hosts:
+            raise HTTPException(status_code=409, detail={"code": "no_failed_hosts", "message": "No failed hosts"})
+        snapshot["limit"] = ",".join(failed_hosts)
+    snapshot["mode"] = mode.value
+    if source.template_id and mode == JobMode.live:
+        active = (await db.execute(select(JobRun).where(JobRun.template_id == source.template_id, JobRun.mode == JobMode.live, JobRun.status.in_([JobStatus.queued, JobStatus.running])))).scalars().all()
+        if active:
+            raise HTTPException(status_code=409, detail={"code": "template_busy", "message": "Template has a queued/running live run"})
+    tmpl = (await db.execute(select(JobTemplate).where(JobTemplate.id == source.template_id))).scalar_one_or_none() if source.template_id else None
+    requires_appr = tmpl.requires_approval if tmpl else True
+    mode_status = JobStatus.queued if mode == JobMode.check or not requires_appr else JobStatus.pending_approval
+    job = JobRun(template_id=source.template_id, playbook_id=source.playbook_id, inventory_id=source.inventory_id, mode=mode, status=mode_status, requested_by=user.id, params_snapshot=snapshot, survey_secrets_enc=source.survey_secrets_enc, relaunch_of_id=source.id)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    await audit(db, "job_relaunched", actor_user_id=user.id, object_type="job_run", object_id=job.id, detail={"source_job_id": source.id, "hosts": req.hosts})
+    if mode_status == JobStatus.pending_approval:
+        from app.tasks.notify import send_notification
+        send_notification.delay("approval_needed", {"event": "approval_needed", "job_id": job.id, "mode": job.mode.value, "template_id": job.template_id, "requested_by": user.id})
+    if mode_status == JobStatus.queued:
+        task = run_job.delay(job.id)
+        job.celery_task_id = task.id
+        await db.commit()
     return {"id": job.id, "status": job.status, "mode": job.mode}
 
 
@@ -167,13 +228,23 @@ async def cancel_job(
     job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
+    if job.status in (
+        JobStatus.successful,
+        JobStatus.failed,
+        JobStatus.canceled,
+        JobStatus.timed_out,
+        JobStatus.rejected,
+    ):
+        raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Job is already finished"})
+
 
     r = aioredis.from_url(settings.REDIS_URL)
     await r.set(f"job:{job.id}:cancel", "1")
 
-    if job.status == JobStatus.queued and job.celery_task_id:
-        from app.tasks.worker import celery_app
-        celery_app.control.revoke(job.celery_task_id)
+    if job.status in (JobStatus.pending_approval, JobStatus.approved, JobStatus.queued):
+        if job.celery_task_id:
+            from app.tasks.worker import celery_app
+            celery_app.control.revoke(job.celery_task_id)
         job.status = JobStatus.canceled
         await db.commit()
 

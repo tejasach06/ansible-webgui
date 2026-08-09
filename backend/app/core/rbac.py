@@ -10,6 +10,7 @@ PERMISSIONS: Dict[str, Set[str]] = {
         "job.approve",
         "job.cancel",
         "schedule.write",
+        "notification.write",
         "read",
     },
     "manager": {
@@ -18,6 +19,7 @@ PERMISSIONS: Dict[str, Set[str]] = {
         "job.approve",
         "job.cancel",
         "schedule.write",
+        "notification.write",
         "read",
     },
     "developer": {

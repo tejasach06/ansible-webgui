@@ -16,6 +16,7 @@ def freeze_params_snapshot(
     become: bool = False,
     become_user: str = None,
     become_method: str = None,
+    diff: bool = False,
     credential_ids: list = None,
     job_timeout: int = 3600,
     git_sha: str = None,
@@ -36,6 +37,7 @@ def freeze_params_snapshot(
         "become": become,
         "become_user": become_user,
         "become_method": become_method,
+        "diff": diff,
         "credential_ids": credential_ids or [],
         "job_timeout": job_timeout
     }

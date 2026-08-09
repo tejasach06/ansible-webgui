@@ -7,14 +7,18 @@ from app.db.session import get_db
 from app.db.models import Credential, JobTemplate, Schedule, User
 from app.api.auth import require
 from app.core.rbac import get_user_permissions
+from app.services.surveys import validate_survey_spec
+
+def survey_error(code: str) -> HTTPException:
+    return HTTPException(status_code=422, detail={"code": code, "message": code})
 
 router = APIRouter(prefix="/api/job_templates", tags=["job_templates"])
 
 async def _reject_credential_user_conflict(db: AsyncSession, credential_ids: List[int]) -> None:
     if credential_ids:
-        named = (await db.execute(select(Credential.name).where(Credential.id.in_(credential_ids), Credential.username.isnot(None)))).scalars().all()
-        if len(named) > 1:
-            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set a username", "credentials": named})
+        rows = (await db.execute(select(Credential.name, Credential.username).where(Credential.id.in_(credential_ids), Credential.username.isnot(None)))).all()
+        if len({username for _, username in rows}) > 1:
+            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set different usernames", "credentials": [name for name, _ in rows]})
 
 
 class JobTemplateCreate(BaseModel):
@@ -30,6 +34,8 @@ class JobTemplateCreate(BaseModel):
     forks: int = 5
     credential_ids: List[int] = []
     requires_approval: bool = True
+    diff_mode: bool = False
+    survey_spec: list = []
 
 class JobTemplateUpdate(BaseModel):
     name: Optional[str] = None
@@ -43,6 +49,8 @@ class JobTemplateUpdate(BaseModel):
     forks: Optional[int] = None
     credential_ids: Optional[List[int]] = None
     requires_approval: Optional[bool] = None
+    diff_mode: Optional[bool] = None
+    survey_spec: Optional[list] = None
 
 @router.get("")
 async def list_templates(
@@ -67,7 +75,9 @@ async def list_templates(
         "verbosity": t.verbosity,
         "forks": t.forks,
         "credential_ids": t.credential_ids,
-        "requires_approval": t.requires_approval
+        "requires_approval": t.requires_approval,
+        "diff_mode": t.diff_mode,
+        "survey_spec": t.survey_spec,
     } for t in templates]
 
 @router.post("")
@@ -77,12 +87,13 @@ async def create_template(
     db: AsyncSession = Depends(get_db)
 ):
     perms = get_user_permissions(user.roles)
-    if req.requires_approval is False and "user.manage" not in perms: # Admin check
-        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Only admin can set requires_approval=false"})
-
+    requires_approval = req.requires_approval if "user.manage" in perms else True
     await _reject_credential_user_conflict(db, req.credential_ids)
-
-    t = JobTemplate(**req.model_dump())
+    try:
+        validate_survey_spec(req.survey_spec)
+    except ValueError as e:
+        raise survey_error(str(e))
+    t = JobTemplate(**req.model_dump(exclude={"requires_approval"}), requires_approval=requires_approval)
     db.add(t)
     await db.commit()
     await db.refresh(t)
@@ -98,17 +109,18 @@ async def update_template(
     t = (await db.execute(select(JobTemplate).where(JobTemplate.id == template_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
-
-    perms = get_user_permissions(user.roles)
-    if req.requires_approval is False and "user.manage" not in perms:
-        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Only admin can set requires_approval=false"})
-
-    if req.credential_ids is not None:
-        await _reject_credential_user_conflict(db, req.credential_ids)
-
-    for k, v in req.model_dump(exclude_unset=True).items():
+    data = req.model_dump(exclude_unset=True)
+    if "credential_ids" in data:
+        await _reject_credential_user_conflict(db, data["credential_ids"])
+    if "survey_spec" in data:
+        try:
+            validate_survey_spec(data["survey_spec"])
+        except ValueError as e:
+            raise survey_error(str(e))
+    if "requires_approval" in data and "user.manage" not in get_user_permissions(user.roles):
+        data.pop("requires_approval")
+    for k, v in data.items():
         setattr(t, k, v)
-
     await db.commit()
     await db.refresh(t)
     return {"id": t.id, "name": t.name}
@@ -122,11 +134,9 @@ async def delete_template(
     t = (await db.execute(select(JobTemplate).where(JobTemplate.id == template_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
-
-    schedules_count = (await db.execute(select(func.count(Schedule.id)).where(Schedule.template_id == template_id))).scalar_one()
-    if schedules_count > 0:
-        raise HTTPException(status_code=409, detail={"code": "template_in_use", "message": "Template referenced by active schedule"})
-
+    count = (await db.execute(select(func.count(Schedule.id)).where(Schedule.template_id == template_id))).scalar_one()
+    if count:
+        raise HTTPException(status_code=409, detail={"code": "template_in_use", "message": "Template is used by schedules"})
     await db.delete(t)
     await db.commit()
     return {"status": "ok"}

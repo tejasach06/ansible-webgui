@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import tempfile
 import redis
@@ -7,6 +8,7 @@ from app.tasks.worker import celery_app
 from app.db.session import SyncSessionLocal
 from app.db.models import JobRun, JobStatus, JobEvent, Project, Playbook
 from app.tasks.job_workspace import export_inventory_snapshot, export_project_snapshot, materialize_credentials
+from app.services.credentials import decrypt_payload
 from app.core.config import settings
 
 redis_client = redis.Redis.from_url(settings.REDIS_URL)
@@ -43,7 +45,13 @@ def run_job(job_run_id: int):
                 snapshot,
             )
 
-            cmdline_str = " ".join(cmdline_extra)
+            cmdline_parts = list(cmdline_extra)
+            if snapshot.get("diff"):
+                cmdline_parts.append("--diff")
+            cmdline_str = " ".join(cmdline_parts)
+            extravars = dict(snapshot.get("extra_vars") or {})
+            if job.survey_secrets_enc:
+                extravars.update(json.loads(decrypt_payload(job.survey_secrets_enc)))
 
             events_batch = []
             event_counter = 0
@@ -98,7 +106,7 @@ def run_job(job_run_id: int):
                 project_dir=proj_export,
                 playbook=snapshot["playbook_rel_path"],
                 inventory=inventory_path,
-                extravars=snapshot.get("extra_vars"),
+                extravars=extravars,
                 limit=snapshot.get("limit"),
                 tags=snapshot.get("tags"),
                 skip_tags=snapshot.get("skip_tags"),
@@ -123,8 +131,10 @@ def run_job(job_run_id: int):
                 job.status = JobStatus.successful
             else:
                 job.status = JobStatus.failed
-            
+
             db.commit()
+            from app.tasks.notify import send_notification
+            send_notification.delay("job_finished", {"event": "job_finished", "job_id": job.id, "status": job.status.value, "mode": job.mode.value, "template_id": job.template_id, "playbook_id": job.playbook_id, "rc": job.rc, "stats": job.stats, "url": None})
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
