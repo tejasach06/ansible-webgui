@@ -12,6 +12,7 @@ from app.db.session import get_db
 router = APIRouter()
 
 
+@router.get("")
 async def list_jobs(
     status: Optional[JobStatus] = None,
     template_id: Optional[int] = None,
@@ -46,6 +47,7 @@ async def list_jobs(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
+@router.get("/{job_id}")
 async def get_job_detail(
     job_id: int,
     user: User = Depends(require("read")),

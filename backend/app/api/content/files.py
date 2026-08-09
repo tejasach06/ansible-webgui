@@ -15,6 +15,7 @@ from app.services.content import commit_file, get_project_repo_path, validate_sa
 router = APIRouter()
 
 
+@router.get("/{project_id}/file")
 async def get_file(
     project_id: int,
     path: str,
@@ -48,6 +49,7 @@ async def get_file(
     }
 
 
+@router.get("/{project_id}/tree")
 async def get_tree(
     project_id: int,
     user: User = Depends(require("read")),
@@ -92,6 +94,7 @@ async def get_tree(
     return {"entries": sorted(entries, key=lambda item: item["rel_path"]), "truncated": truncated}
 
 
+@router.post("/{project_id}/save")
 async def save_file(
     project_id: int,
     req: SaveFileRequest,

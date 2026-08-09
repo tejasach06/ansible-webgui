@@ -15,6 +15,7 @@ from app.core.config import settings
 router = APIRouter()
 
 
+@router.get("/{job_id}/events/stream")
 async def stream_job_events(
     job_id: int,
     request: Request,

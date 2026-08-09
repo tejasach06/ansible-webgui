@@ -13,6 +13,7 @@ from app.services.content import get_project_repo_path
 router = APIRouter()
 
 
+@router.post("/{project_id}/roles")
 async def create_role(
     project_id: int,
     req: CreateRoleRequest,

@@ -15,6 +15,7 @@ from app.services.content import get_project_repo_path, validate_safe_path
 router = APIRouter()
 
 
+@router.get("/{project_id}/history")
 async def get_history(
     project_id: int,
     path: Optional[str] = None,
@@ -38,6 +39,7 @@ async def get_history(
     return res
 
 
+@router.get("/{project_id}/diff")
 async def get_diff(
     project_id: int,
     sha: str,
@@ -56,6 +58,7 @@ async def get_diff(
     return {"diff": diff_text}
 
 
+@router.post("/{project_id}/revert")
 async def revert_commit(
     project_id: int,
     req: RevertRequest,
