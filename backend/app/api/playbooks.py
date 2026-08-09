@@ -1,0 +1,146 @@
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.db.session import get_db
+from app.db.models import Playbook, Project, User
+from app.api.auth import require
+from app.services.content import commit_file, get_project_repo_path, validate_safe_path
+from git import Repo
+
+router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
+
+class PlaybookRegister(BaseModel):
+    project_id: int
+    rel_path: str
+    name: str
+
+class PlaybookUpdate(BaseModel):
+    name: Optional[str] = None
+    rel_path: Optional[str] = None
+
+class PlaybookFileSave(BaseModel):
+    content: str
+    message: str
+    base_sha: Optional[str] = None
+
+async def _load_playbook(db: AsyncSession, playbook_id: int) -> Playbook:
+    pb = (await db.execute(select(Playbook).where(Playbook.id == playbook_id))).scalar_one_or_none()
+    if not pb:
+        raise HTTPException(status_code=404, detail={"code": "playbook_not_found", "message": "Playbook row not found"})
+    return pb
+
+def _playbook_response(pb: Playbook):
+    return {"id": pb.id, "project_id": pb.project_id, "rel_path": pb.rel_path, "name": pb.name}
+
+@router.get("")
+async def list_playbooks(
+    project_id: Optional[int] = None,
+    user: User = Depends(require("read")),
+    db: AsyncSession = Depends(get_db)
+):
+    query = select(Playbook)
+    if project_id:
+        query = query.where(Playbook.project_id == project_id)
+    playbooks = (await db.execute(query)).scalars().all()
+    return [_playbook_response(pb) for pb in playbooks]
+
+@router.post("")
+async def register_playbook(
+    req: PlaybookRegister,
+    user: User = Depends(require("content.write")),
+    db: AsyncSession = Depends(get_db)
+):
+    project = (await db.execute(select(Project).where(Project.id == req.project_id))).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "project_not_found", "message": "Project not found"})
+
+    repo_path = get_project_repo_path(project.name)
+    try:
+        file_path = validate_safe_path(repo_path, req.rel_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
+
+    pb = Playbook(project_id=req.project_id, rel_path=req.rel_path, name=req.name)
+    db.add(pb)
+    await db.commit()
+    await db.refresh(pb)
+    return _playbook_response(pb)
+
+@router.get("/{playbook_id}/file")
+async def get_playbook_file(
+    playbook_id: int,
+    user: User = Depends(require("read")),
+    db: AsyncSession = Depends(get_db)
+):
+    pb = await _load_playbook(db, playbook_id)
+    project = (await db.execute(select(Project).where(Project.id == pb.project_id))).scalar_one()
+    repo_path = get_project_repo_path(project.name)
+    try:
+        file_path = validate_safe_path(repo_path, pb.rel_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
+    return {"id": pb.id, "rel_path": pb.rel_path, "content": file_path.read_text(), "sha": Repo(repo_path).head.commit.hexsha}
+
+@router.post("/{playbook_id}/file")
+async def save_playbook_file(
+    playbook_id: int,
+    req: PlaybookFileSave,
+    user: User = Depends(require("content.write")),
+    db: AsyncSession = Depends(get_db)
+):
+    pb = await _load_playbook(db, playbook_id)
+    project = (await db.execute(select(Project).where(Project.id == pb.project_id))).scalar_one()
+    repo_path = get_project_repo_path(project.name)
+    try:
+        file_path = validate_safe_path(repo_path, pb.rel_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
+    sha = await commit_file(db, project, pb.rel_path, req.content, req.message or f"Update playbook {pb.name}", req.base_sha, user, lint=True)
+    return {"status": "ok", "sha": sha}
+
+@router.patch("/{playbook_id}")
+async def update_playbook(
+    playbook_id: int,
+    req: PlaybookUpdate,
+    user: User = Depends(require("content.write")),
+    db: AsyncSession = Depends(get_db)
+):
+    pb = await _load_playbook(db, playbook_id)
+    if req.rel_path is not None and req.rel_path != pb.rel_path:
+        project = (await db.execute(select(Project).where(Project.id == pb.project_id))).scalar_one()
+        repo_path = get_project_repo_path(project.name)
+        try:
+            file_path = validate_safe_path(repo_path, req.rel_path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
+        duplicate = (await db.execute(select(Playbook).where(Playbook.project_id == pb.project_id, Playbook.rel_path == req.rel_path, Playbook.id != playbook_id))).scalar_one_or_none()
+        if duplicate:
+            raise HTTPException(status_code=400, detail={"code": "path_exists", "message": "Playbook path already registered in this project"})
+        pb.rel_path = req.rel_path
+    if req.name is not None:
+        pb.name = req.name
+    await db.commit()
+    await db.refresh(pb)
+    return _playbook_response(pb)
+
+@router.delete("/{playbook_id}")
+async def delete_playbook_row(
+    playbook_id: int,
+    user: User = Depends(require("content.write")),
+    db: AsyncSession = Depends(get_db)
+):
+    pb = await _load_playbook(db, playbook_id)
+    await db.delete(pb)
+    await db.commit()
+    return {"status": "ok"}

@@ -1,0 +1,1 @@
+export function NotFoundPage(){return <div className="rounded-lg border border-zinc-200 p-6 dark:border-zinc-800"><h1 className="text-xl font-semibold">Page not found</h1></div>} export default NotFoundPage;

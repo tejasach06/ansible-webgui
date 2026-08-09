@@ -1,0 +1,41 @@
+import type { ApiError } from "./api";
+export const ERROR_COPY: Record<string, string> = {
+  csrf_missing: "The request was blocked by CSRF protection. Reload the page and try again.",
+  invalid_credentials: "Username or password is incorrect.",
+  forbidden: "Your role does not allow this action.",
+  username_exists: "That username is taken. Pick another.",
+  user_not_found: "That user no longer exists. Reload the list.",
+  self_deactivation_forbidden: "You cannot deactivate or delete your own account.",
+  user_referenced: "This user has job runs, so the record must stay. Deactivate the account instead.",
+  name_exists: "That name is already in use. Pick another.",
+  project_not_found: "That project no longer exists. Reload the list.",
+  project_has_runs: "This project has job runs and cannot be deleted.",
+  bad_path: "That path escapes the project repository. Use a path inside the project.",
+  file_not_found: "No such file in the project repository. Commit the file first, then register it.",
+  executable_inventory_forbidden: "Executable inventories are not allowed. Use a .yml or .ini inventory file.",
+  playbook_not_found: "That playbook no longer exists. Reload the list.",
+  inventory_not_found: "That inventory no longer exists. Reload the list.",
+  inventory_repo_missing: "Shared inventory repo is not initialized. Restart the API.",
+  reserved_project_name: "That project name is reserved for the shared inventory repo.",
+  inventory_repo_undeletable: "The shared inventory repo cannot be deleted.",
+  inventory_in_use: "Inventory is still used by one or more job templates.",
+  credential_not_found: "That credential no longer exists. Reload the list.",
+  template_not_found: "That job template no longer exists. Reload the list.",
+  template_in_use: "A schedule still uses this template. Delete the schedule first.",
+  template_busy: "This template already has a queued or running live job. Wait for it to finish.",
+  job_not_found: "That job run no longer exists.",
+  self_approval_forbidden: "You cannot approve a job you requested. Ask another approver.",
+  bad_state: "This job is no longer awaiting approval. Reload to see its current state.",
+  stale_write: "This file changed in git since you opened it. Reload it or overwrite the newer version.",
+  lint_error: "ansible-lint rejected this file. Fix the reported issue and save again.",
+  bad_cron: "That is not a valid cron expression. Use five fields, for example 0 3 * * *.",
+  bad_timezone: "That is not a recognised IANA timezone, for example Europe/Berlin.",
+  role_exists: "A role directory with that name already exists.",
+  schedule_not_found: "That schedule no longer exists. Reload the list.",
+  internal_error: "The server failed to handle that request. Check the api container logs.",
+};
+export function errorText(err: unknown): { title: string; detail?: string } {
+  const api = err as ApiError;
+  const mapped = api?.code ? ERROR_COPY[api.code] : undefined;
+  return { title: mapped ?? api?.message ?? "Request failed.", detail: mapped ? undefined : api?.message };
+}

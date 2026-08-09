@@ -1,0 +1,15 @@
+@import "@xterm/xterm/css/xterm.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 antialiased; }
+  *:focus-visible { @apply outline-none ring-2 ring-sky-500 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950; }
+  dialog::backdrop { @apply bg-zinc-950/40 backdrop-blur-none; }
+  dialog { @apply text-zinc-900 dark:text-zinc-100; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}

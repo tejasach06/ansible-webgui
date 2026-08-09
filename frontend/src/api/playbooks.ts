@@ -1,0 +1,9 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "../lib/api";
+import type { Playbook, PlaybookFile } from "../lib/types";
+export function usePlaybooks(projectId?: number) { const qs=projectId?`?project_id=${projectId}`:""; return useQuery({ queryKey: ["playbooks", projectId], queryFn: () => apiFetch<Playbook[]>("/api/playbooks"+qs) }); }
+export function useCreatePlaybooks() { const qc=useQueryClient(); return useMutation({ mutationFn: (body: unknown) => apiFetch<Playbook>("/api/playbooks", { method:"POST", body: JSON.stringify(body) }), onSuccess: () => qc.invalidateQueries({ queryKey:["playbooks"] }) }); }
+export function useDeletePlaybooks() { const qc=useQueryClient(); return useMutation({ mutationFn: (id:number) => apiFetch(`/api/playbooks/${id}`, { method:"DELETE" }), onSuccess: () => qc.invalidateQueries({ queryKey:["playbooks"] }) }); }
+export function useUpdatePlaybook(id:number) { const qc=useQueryClient(); return useMutation({ mutationFn:(body:unknown)=>apiFetch<Playbook>(`/api/playbooks/${id}`, { method:"PATCH", body: JSON.stringify(body) }), onSuccess:()=>qc.invalidateQueries({ queryKey:["playbooks"] }) }); }
+export function usePlaybookFile(id:number|undefined) { return useQuery({ queryKey:["playbooks",id,"file"], enabled:!!id, queryFn:()=>apiFetch<PlaybookFile>(`/api/playbooks/${id}/file`) }); }
+export function useSavePlaybookFile(id:number) { const qc=useQueryClient(); return useMutation({ mutationFn:(body:unknown)=>apiFetch<{status:string;sha:string}>(`/api/playbooks/${id}/file`, { method:"POST", body: JSON.stringify(body) }), onSuccess:()=>qc.invalidateQueries({ queryKey:["playbooks",id,"file"] }) }); }

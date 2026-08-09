@@ -1,0 +1,24 @@
+FROM python:3.12-slim-bookworm AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.5.24 /uv /usr/local/bin/uv
+WORKDIR /app
+COPY backend/pyproject.toml backend/README.md /app/
+RUN uv pip install --system --no-cache .
+
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git openssh-client postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 runner && mkdir -p /data/content /data/artifacts /home/runner/.ssh \
+    && chown -R runner:runner /data /home/runner
+
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+RUN rm -f /usr/local/bin/uv
+WORKDIR /app
+COPY backend /app/
+
+ENV PYTHONPATH=/app PYTHONDONTWRITEBYTECODE=1
+USER runner

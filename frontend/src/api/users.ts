@@ -1,0 +1,5 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"; import { apiFetch } from "../lib/api"; import type { ListResponse, UserItem } from "../lib/types";
+export function useUsers(limit=50,offset=0){return useQuery({queryKey:["users",{limit,offset}], queryFn:()=>apiFetch<ListResponse<UserItem>>(`/api/users?limit=${limit}&offset=${offset}`)})}
+export function useCreateUser(){const qc=useQueryClient();return useMutation({mutationFn:(body:unknown)=>apiFetch<UserItem>("/api/users",{method:"POST",body:JSON.stringify(body)}),onSuccess:()=>qc.invalidateQueries({queryKey:["users"]})})}
+export function useUpdateUser(){const qc=useQueryClient();return useMutation({mutationFn:(v:{id:number;body:unknown})=>apiFetch<UserItem>(`/api/users/${v.id}`,{method:"PATCH",body:JSON.stringify(v.body)}),onSuccess:()=>qc.invalidateQueries({queryKey:["users"]})})}
+export function useSetPassword(){return useMutation({mutationFn:(v:{id:number;password:string})=>apiFetch(`/api/users/${v.id}/password`,{method:"POST",body:JSON.stringify({password:v.password})})})}
