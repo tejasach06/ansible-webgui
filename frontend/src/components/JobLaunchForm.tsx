@@ -10,8 +10,9 @@ import { Button } from "./Button";
 import { ErrorBanner } from "./ErrorBanner";
 import { Checkbox, NumberInput, Select, TextArea, TextInput } from "./Field";
 import { useToast } from "./Toast";
+import { buildInventory } from "./InventoryHostsWizard";
 
-const inventoryStarters: Record<InventoryFormat, string> = { yaml: "all:\n  hosts:\n    host1.example.com:\n", ini: "[all]\nhost1.example.com\n" };
+const inventoryStarters: Record<InventoryFormat, string> = { yaml: buildInventory({ format: "yaml", group: "all", hosts: ["host1.example.com"] }), ini: buildInventory({ format: "ini", group: "all", hosts: ["host1.example.com"] }) };
 function freshNewInventory() { return { name: "", filename: "", format: "yaml" as InventoryFormat, content: inventoryStarters.yaml }; }
 export const init = { template_id: "", playbook_id: "", inventory_id: "", mode: "check" as JobMode, limit: "", tags: "", skip_tags: "", verbosity: 0, forks: 5, become: false, become_user: "", become_method: "", credential_ids: [] as number[], extra_vars: "{}", diff: false, survey_answers: {} as Record<string, unknown> };
 export type LaunchForm = typeof init;

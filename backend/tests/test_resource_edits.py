@@ -105,6 +105,25 @@ async def test_request_job_rejects_multiple_credential_usernames(client, db):
 
 
 @pytest.mark.asyncio(loop_scope="session")
+async def test_request_job_allows_password_and_become_credentials_for_same_username(client, db):
+    await login(client)
+    project, _ = await _project_with_playbooks(db, "job-user-shared-project")
+    playbook = Playbook(project_id=project.id, rel_path="playbooks/site.yml", name="site")
+    inv = await _inventory(db, "job-user-shared-inv")
+    c1 = Credential(name="shared-ssh", kind=CredentialKind.ssh_password, username="tejas", payload_enc=b"x", created_by=1)
+    c2 = Credential(name="shared-become", kind=CredentialKind.become_password, username="tejas", payload_enc=b"y", created_by=1)
+    db.add_all([playbook, c1, c2])
+    await db.commit()
+    await db.refresh(playbook)
+    await db.refresh(c1)
+    await db.refresh(c2)
+
+    res = await client.post("/api/jobs", json={"playbook_id": playbook.id, "inventory_id": inv.id, "mode": "check", "credential_ids": [c1.id, c2.id]}, headers=MUTATE)
+
+    assert res.status_code != 422
+
+
+@pytest.mark.asyncio(loop_scope="session")
 async def test_patch_playbook_repaths_existing_file_and_rejects_missing(client, db):
     await login(client)
     project, _ = await _project_with_playbooks(db, "playbook-repath-project")

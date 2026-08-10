@@ -11,11 +11,15 @@ from app.api.auth import require
 from app.services.content import ensure_inventory_repo, get_inventory_repo_path, validate_safe_path
 
 router = APIRouter(prefix="/api/inventories", tags=["inventories"])
+INVENTORY_DIR = "inventories"
+
 
 class InventoryRegister(BaseModel):
-    rel_path: str
+    filename: str
     name: str
     format: InventoryFormat
+    content: Optional[str] = None
+    message: Optional[str] = None
 
 class InventoryFileSave(BaseModel):
     content: str
@@ -35,6 +39,13 @@ async def _load_inventory(db: AsyncSession, inventory_id: int) -> Inventory:
 def _inventory_response(inv: Inventory):
     return {"id": inv.id, "rel_path": inv.rel_path, "name": inv.name, "format": inv.format}
 
+def _inventory_rel_path(filename: str) -> str:
+    fn = filename.strip()
+    if not fn or "/" in fn or "\\" in fn or fn.startswith(".") or fn in {".", ".."}:
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Filename must be a plain file name inside inventories/, with no path separators"})
+    return f"{INVENTORY_DIR}/{fn}"
+
+
 @router.get("")
 async def list_inventories(
     request: Request,
@@ -52,25 +63,40 @@ async def register_inventory(
     user: User = Depends(require("content.write")),
     db: AsyncSession = Depends(get_db)
 ):
-    if req.rel_path.endswith(".py") or req.rel_path.endswith(".sh"):
-        raise HTTPException(status_code=400, detail={"code": "executable_inventory_forbidden", "message": "Executable inventories forbidden"})
 
+    rel_path = _inventory_rel_path(req.filename)
+    if rel_path.endswith((".py", ".sh")):
+        raise HTTPException(status_code=400, detail={"code": "executable_inventory_forbidden", "message": "Executable inventories forbidden"})
     repo_path = get_inventory_repo_path()
     if not (repo_path / ".git").exists():
         raise HTTPException(status_code=404, detail={"code": "inventory_repo_missing", "message": "Shared inventory repo is not initialized. Restart the API."})
     try:
-        file_path = validate_safe_path(repo_path, req.rel_path)
+        file_path = validate_safe_path(repo_path, rel_path)
     except ValueError:
         raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
 
-    if not file_path.is_file():
-        raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Inventory file not found in git repo"})
-
-    duplicate = (await db.execute(select(Inventory).where(or_(Inventory.name == req.name, Inventory.rel_path == req.rel_path)))).scalar_one_or_none()
+    duplicate = (await db.execute(select(Inventory).where(or_(Inventory.name == req.name, Inventory.rel_path == rel_path)))).scalar_one_or_none()
     if duplicate:
         raise HTTPException(status_code=400, detail={"code": "name_exists", "message": "Inventory name or path already registered"})
 
-    inv = Inventory(rel_path=req.rel_path, name=req.name, format=req.format)
+    if not file_path.is_file():
+        if req.content is None:
+            raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Inventory file not found in git repo"})
+        if req.format == InventoryFormat.yaml:
+            try:
+                yaml.safe_load(req.content)
+            except yaml.YAMLError as exc:
+                raise HTTPException(status_code=422, detail={"code": "invalid_yaml", "message": "Inventory YAML is invalid", "stderr": str(exc)})
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(req.content)
+        repo = Repo(repo_path)
+        repo.index.add([rel_path])
+        actor = Actor(user.username, user.email)
+        message = req.message or f"Create inventory {req.name}"
+        commit = repo.index.commit(message, author=actor, committer=actor)
+        db.add(Commit(project_id=(await ensure_inventory_repo(db)).id, sha=commit.hexsha, author_user_id=user.id, message=message, files_changed=[rel_path]))
+
+    inv = Inventory(rel_path=rel_path, name=req.name, format=req.format)
     db.add(inv)
     await db.commit()
     await db.refresh(inv)

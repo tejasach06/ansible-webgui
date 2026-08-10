@@ -72,7 +72,7 @@ export function JobsPage() {
 
   const pickTemplate = (id: string) => {
     const t = templates.data?.find((x) => String(x.id) === id);
-    setForm({ ...form, template_id: id, playbook_id: t ? String(t.playbook_id) : form.playbook_id, inventory_id: t ? String(t.inventory_id) : form.inventory_id, diff: t?.diff_mode ?? form.diff, survey_answers: {} });
+    setForm({ ...form, template_id: id, playbook_id: t ? String(t.playbook_id) : form.playbook_id, inventory_id: t ? String(t.inventory_id) : form.inventory_id, credential_ids: t ? t.credential_ids : form.credential_ids, diff: t?.diff_mode ?? form.diff, survey_answers: {} });
   };
 
   const submit = () => {

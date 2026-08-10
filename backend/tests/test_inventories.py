@@ -22,7 +22,7 @@ async def test_register_global_inventory_from_shared_repo(client, db, monkeypatc
     await login(client)
     res = await client.post(
         "/api/inventories",
-        json={"name": "prod", "rel_path": "inventories/prod.yml", "format": "yaml"},
+        json={"name": "prod", "filename": "prod.yml", "format": "yaml"},
         headers={"X-Requested-With": "XMLHttpRequest"},
     )
 
@@ -70,7 +70,7 @@ async def test_duplicate_inventory_path_rejected(client, db, monkeypatch, tmp_pa
     repo.index.commit("Add prod inventory", author=actor, committer=actor)
 
     await login(client)
-    payload = {"name": "prod2-a", "rel_path": "inventories/prod2.yml", "format": "yaml"}
+    payload = {"name": "prod2-a", "filename": "prod2.yml", "format": "yaml"}
     first = await client.post("/api/inventories", json=payload, headers={"X-Requested-With": "XMLHttpRequest"})
     second = await client.post(
         "/api/inventories",
@@ -98,11 +98,27 @@ async def _register_inventory(client, db, monkeypatch, tmp_path, rel_path=None, 
     await login(client)
     res = await client.post(
         "/api/inventories",
-        json={"name": name, "rel_path": rel_path, "format": fmt},
+        json={"name": name, "filename": rel_path.removeprefix("inventories/"), "format": fmt},
         headers={"X-Requested-With": "XMLHttpRequest"},
     )
     assert res.status_code == 200
     return res.json(), repo_path
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_register_inventory_rejects_subdirectory_filenames(client, db, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "CONTENT_ROOT", str(tmp_path))
+    await ensure_inventory_repo(db)
+    await login(client)
+
+    for filename in ("sub/prod.yml", "../escape.yml"):
+        res = await client.post(
+            "/api/inventories",
+            json={"name": f"bad-{filename}", "filename": filename, "format": "yaml"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+
+        assert res.status_code == 400
+        assert res.json()["detail"]["code"] == "bad_path"
 
 
 @pytest.mark.asyncio(loop_scope="session")

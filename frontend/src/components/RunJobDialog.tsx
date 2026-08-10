@@ -1,0 +1,87 @@
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useLaunchJob } from "../api/jobs";
+import { usePlaybooks } from "../api/playbooks";
+import { Button } from "./Button";
+import { Dialog } from "./Dialog";
+import { EmptyState } from "./EmptyState";
+import { ErrorBanner } from "./ErrorBanner";
+import { Select } from "./Field";
+import { buildLaunchBody, init, JobLaunchForm, type LaunchForm } from "./JobLaunchForm";
+import { useToast } from "./Toast";
+
+export function RunJobDialog({ open, onClose, playbookId, projectId }: { open: boolean; onClose: () => void; playbookId?: number; projectId?: number }) {
+  const nav = useNavigate();
+  const { toast } = useToast();
+  const first = useRef<HTMLSelectElement>(null);
+  const [form, setForm] = useState<LaunchForm>({ ...init, credential_ids: [] });
+  const [extraError, setExtraError] = useState("");
+  const [selectedPlaybook, setSelectedPlaybook] = useState("");
+  const playbooks = usePlaybooks(projectId);
+  const launch = useLaunchJob();
+  const needsPlaybookSelection = !!projectId && !playbookId;
+  const ready = !needsPlaybookSelection || !!selectedPlaybook;
+  const valid = ready && !!form.playbook_id && !!form.inventory_id;
+
+  useEffect(() => {
+    if (!open) return;
+    const fixed = playbookId ? String(playbookId) : "";
+    setSelectedPlaybook(fixed);
+    setForm({ ...init, credential_ids: [], playbook_id: fixed });
+    setExtraError("");
+    launch.reset();
+  }, [open, playbookId, projectId]);
+
+  const close = () => {
+    onClose();
+    setForm({ ...init, credential_ids: [] });
+    setSelectedPlaybook("");
+    setExtraError("");
+    launch.reset();
+  };
+
+  const choosePlaybook = (id: string) => {
+    setSelectedPlaybook(id);
+    setForm((f) => ({ ...f, playbook_id: id }));
+  };
+
+  const submit = () => {
+    const body = buildLaunchBody(form);
+    if (!body) {
+      setExtraError("Extra vars must be a JSON object, for example {}");
+      return;
+    }
+    launch.mutate(body, {
+      onSuccess: (job) => {
+        toast(`Job #${job.id} ${job.status}`);
+        close();
+        nav(`/jobs/${job.id}`);
+      },
+    });
+  };
+
+  return (
+    <Dialog open={open} onClose={close} title="Run playbook" size="full" initialFocusRef={first}>
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        {(playbooks.error || launch.error) && <ErrorBanner error={playbooks.error || launch.error} />}
+        {needsPlaybookSelection && !selectedPlaybook ? (
+          <div className="grid max-w-2xl gap-4">
+            {(playbooks.data?.length ?? 0) === 0 && !playbooks.isLoading ? <EmptyState>No playbooks registered.</EmptyState> : null}
+            <Select ref={first} id="run-playbook" label="Playbook" value={selectedPlaybook} onChange={(e) => choosePlaybook(e.target.value)}>
+              <option value="">Select playbook</option>
+              {playbooks.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-auto pr-1">
+            <JobLaunchForm form={form} setForm={setForm} extraError={extraError} setExtraError={setExtraError} lockPlaybook firstRef={first} onNewInventory={() => undefined} />
+          </div>
+        )}
+        <div className="flex shrink-0 justify-end gap-2">
+          <Button variant="secondary" onClick={close}>Cancel</Button>
+          <Button disabled={!valid} loading={launch.isPending} onClick={submit}>Launch</Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
