@@ -26,8 +26,7 @@ const PROJECT_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const PROJECT_NAME_ERROR = "1-64 chars of letters, digits, dot, dash or underscore";
 export function ProjectsPage() {
   const nav = useNavigate();
-  const { can } = useAuth();
-  const canRunJob = can("job.request") || can("job.run_check");
+  const { can, canInProject } = useAuth();
   const { toast } = useToast();
   const { effectiveTheme } = useTheme();
   const list = useProjects();
@@ -126,13 +125,13 @@ export function ProjectsPage() {
   const openEdit = (p: Project) => { setEdit(p); setEditForm({ name: p.name, default_branch: p.default_branch }); };
   const closeEdit = () => setEdit(undefined);
   return <section className="grid gap-4">
-    <div className="flex items-center justify-between"><h1 className="text-xl font-semibold">Projects</h1>{can("content.write") && <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={openCreate}>Create project</Button>}</div>
+    <div className="flex items-center justify-between"><h1 className="text-xl font-semibold">Projects</h1>{can("project.create") && <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={openCreate}>Create project</Button>}</div>
     {(list.error || playbooks.error || del.error || updateEdit.error) && <ErrorBanner error={list.error || playbooks.error || del.error || updateEdit.error} />}
     <DataTable<Project> rows={list.data ?? []} loading={list.isLoading} empty={<EmptyState>No projects yet. Create a project to sync content.</EmptyState>} columns={[
       { key: "name", header: "Name", render: r => <Link className="font-medium underline" to={`/projects/${r.id}`}>{r.name}</Link> },
       { key: "git_path", header: "Git path", render: r => r.git_path },
       { key: "default_branch", header: "Default branch", render: r => r.default_branch },
-      { key: "actions", header: "Actions", render: r => { const runTitle = r.is_inventory_repo ? "Inventory repo cannot run playbooks" : (projectPlaybookCounts.get(r.id) ?? 0) === 0 ? "No playbooks registered" : undefined; return <div className="flex gap-2">{canRunJob && <Button size="sm" variant="secondary" icon={<Play size={14} />} disabled={!!runTitle} title={runTitle} onClick={() => setRunProject(r)}>Run</Button>}{can("content.write") && <>{!r.is_inventory_repo && <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => openEdit(r)}>Edit</Button>}<Button size="sm" variant="danger" onClick={() => setTarget(r)}>Delete</Button></>}</div>; } }
+      { key: "actions", header: "Actions", render: r => { const runTitle = r.is_inventory_repo ? "Inventory repo cannot run playbooks" : (projectPlaybookCounts.get(r.id) ?? 0) === 0 ? "No playbooks registered" : undefined; const canRunJob = canInProject(r.id, "job.request") || canInProject(r.id, "job.run_check"); return <div className="flex gap-2">{canRunJob && <Button size="sm" variant="secondary" icon={<Play size={14} />} disabled={!!runTitle} title={runTitle} onClick={() => setRunProject(r)}>Run</Button>}{canInProject(r.id, "project.admin") && <>{!r.is_inventory_repo && <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => openEdit(r)}>Edit</Button>}<Button size="sm" variant="danger" onClick={() => setTarget(r)}>Delete</Button></>}</div>; } }
     ]} />
     <RunJobDialog open={!!runProject} onClose={() => setRunProject(undefined)} projectId={runProject?.id} />
     <Dialog open={open} size="full" onClose={close} title="Create project" initialFocusRef={first}>
@@ -155,7 +154,7 @@ export function ProjectsPage() {
               <TextInput id="first-playbook-path" label="Rel path" value={firstPlaybook.rel_path} onChange={e => setFirstPlaybookPath(e.target.value)} />
             </div>
             <div className="grid shrink-0 gap-3">{createPlaybook.error && <ErrorBanner error={createPlaybook.error} />}{lintError && <pre className="max-h-40 overflow-auto rounded bg-red-950 p-3 text-xs text-red-50">{lintError}</pre>}</div>
-            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"><Editor height="100%" language="yaml" theme={effectiveTheme === "dark" ? "vs-dark" : "light"} value={content} onChange={v => { setContent(v ?? ""); setContentTouched(true); }} options={playbookEditorOptions(!can("content.write"))} /></div>
+            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"><Editor height="100%" language="yaml" theme={effectiveTheme === "dark" ? "vs-dark" : "light"} value={content} onChange={v => { setContent(v ?? ""); setContentTouched(true); }} options={playbookEditorOptions(false)} /></div>
           </>}
           <div className="flex shrink-0 justify-end gap-2"><Button variant="secondary" onClick={() => setStep(2)}>Skip</Button>{addFirst && <Button disabled={!validFirstPlaybook} loading={createPlaybook.isPending} onClick={submitFirstPlaybook}>Create playbook</Button>}</div>
         </div>}
