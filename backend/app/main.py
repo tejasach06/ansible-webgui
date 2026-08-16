@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from app.api import auth, users, credentials, projects, playbooks, inventories, job_templates, jobs, content, schedules, audit
+from app.api import auth, users, credentials, projects, playbooks, inventories, job_templates, jobs, content, schedules, audit, notifications
 
 app = FastAPI(title="Ansible WebGUI API", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -15,6 +15,7 @@ app.include_router(jobs.router)
 app.include_router(content.router)
 app.include_router(schedules.router)
 app.include_router(audit.router)
+app.include_router(notifications.router)
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):

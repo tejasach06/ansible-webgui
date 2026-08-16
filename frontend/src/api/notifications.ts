@@ -1,0 +1,6 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"; import { apiFetch } from "../lib/api"; import type { Notification } from "../lib/types";
+export function useNotifications(){return useQuery({queryKey:["notifications"],queryFn:()=>apiFetch<Notification[]>("/api/notifications")})}
+export function useCreateNotification(){const qc=useQueryClient();return useMutation({mutationFn:(body:unknown)=>apiFetch<Notification>("/api/notifications",{method:"POST",body:JSON.stringify(body)}),onSuccess:()=>qc.invalidateQueries({queryKey:["notifications"]})})}
+export function useUpdateNotification(){const qc=useQueryClient();return useMutation({mutationFn:(v:{id:number;body:unknown})=>apiFetch<Notification>(`/api/notifications/${v.id}`,{method:"PATCH",body:JSON.stringify(v.body)}),onSuccess:()=>qc.invalidateQueries({queryKey:["notifications"]})})}
+export function useDeleteNotification(){const qc=useQueryClient();return useMutation({mutationFn:(id:number)=>apiFetch(`/api/notifications/${id}`,{method:"DELETE"}),onSuccess:()=>qc.invalidateQueries({queryKey:["notifications"]})})}
+export function useTestNotification(){return useMutation({mutationFn:(id:number)=>apiFetch(`/api/notifications/${id}/test`,{method:"POST"})})}

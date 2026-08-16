@@ -60,6 +60,9 @@ def materialize_credentials(db, temp_dir: str, credential_ids: list[int], snapsh
 
     passwords = {}
     cmdline_extra = []
+    need_ask_pass = False
+    need_ask_become_pass = False
+    user_arg: str | None = None
 
     if snapshot.get("mode") == "check":
         cmdline_extra.extend(["--check", "--diff"])
@@ -75,23 +78,31 @@ def materialize_credentials(db, temp_dir: str, credential_ids: list[int], snapsh
         creds = db.query(Credential).filter(Credential.id.in_(credential_ids)).all()
         for c in creds:
             dec = decrypt_payload(c.payload_enc)
-            if c.username:
-                cmdline_extra.append(f"--user={c.username}")
+            if c.username and user_arg is None:
+                user_arg = c.username
+                cmdline_extra.append(f"--user={user_arg}")
             if c.kind == "ssh_key":
                 key_file = os.path.join(env_dir, "ssh_key")
                 with open(key_file, "w") as kf:
                     kf.write(dec)
                 os.chmod(key_file, 0o600)
             elif c.kind == "ssh_password":
-                passwords["SSH password:"] = dec
+                passwords[r"^SSH password:\s*?$"] = dec
+                need_ask_pass = True
             elif c.kind == "become_password":
-                passwords["BECOME password:"] = dec
+                passwords[r"^BECOME password.*:\s*?$"] = dec
+                need_ask_become_pass = True
             elif c.kind == "vault_password":
                 v_file = os.path.join(temp_dir, "vault_pw")
                 with open(v_file, "w") as vf:
                     vf.write(dec)
                 os.chmod(v_file, 0o600)
                 cmdline_extra.extend(["--vault-password-file", v_file])
+
+    if need_ask_pass:
+        cmdline_extra.append("--ask-pass")
+    if need_ask_become_pass:
+        cmdline_extra.append("--ask-become-pass")
 
     if passwords:
         with open(os.path.join(env_dir, "passwords"), "w") as pf:

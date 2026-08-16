@@ -2,11 +2,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from app.db.session import get_db
 from app.db.models import Playbook, Project, User
 from app.api.auth import require
 from app.services.content import commit_file, get_project_repo_path, validate_safe_path
+from app.services.audit import audit
 from git import Repo
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
@@ -15,6 +16,8 @@ class PlaybookRegister(BaseModel):
     project_id: int
     rel_path: str
     name: str
+    content: Optional[str] = None
+    message: Optional[str] = None
 
 class PlaybookUpdate(BaseModel):
     name: Optional[str] = None
@@ -62,13 +65,24 @@ async def register_playbook(
     except ValueError:
         raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
 
-    if not file_path.is_file():
-        raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
+    if req.content is not None and not req.rel_path.endswith((".yml", ".yaml")):
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Playbook file must end in .yml or .yaml"})
 
+    duplicate = (await db.execute(select(Playbook).where(Playbook.project_id == req.project_id, or_(Playbook.name == req.name, Playbook.rel_path == req.rel_path)))).scalar_one_or_none()
+    if duplicate:
+        raise HTTPException(status_code=400, detail={"code": "name_exists", "message": "Playbook name or path already registered"})
+
+    created_file = False
+    if not file_path.is_file():
+        if req.content is None:
+            raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
+        await commit_file(db, project, req.rel_path, req.content, req.message or f"Create playbook {req.name}", None, user, lint=True)
+        created_file = True
     pb = Playbook(project_id=req.project_id, rel_path=req.rel_path, name=req.name)
     db.add(pb)
     await db.commit()
     await db.refresh(pb)
+    await audit(db, "playbook_registered", actor_user_id=user.id, object_type="playbook", object_id=pb.id, detail={"created": created_file})
     return _playbook_response(pb)
 
 @router.get("/{playbook_id}/file")

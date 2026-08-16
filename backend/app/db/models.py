@@ -20,6 +20,10 @@ class CredentialKind(str, enum.Enum):
     vault_password = "vault_password"
     become_password = "become_password"
 
+class NotificationKind(str, enum.Enum):
+    webhook = "webhook"
+    slack = "slack"
+
 class JobMode(str, enum.Enum):
     check = "check"
     live = "live"
@@ -104,6 +108,8 @@ class JobTemplate(Base):
     forks: Mapped[int] = mapped_column(SmallInteger, default=5, nullable=False)
     credential_ids: Mapped[List[int]] = mapped_column(ARRAY(Integer), default=list, nullable=False)
     requires_approval: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    survey_spec: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    diff_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 class JobRun(Base):
     __tablename__ = "job_runs"
@@ -124,6 +130,8 @@ class JobRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    survey_secrets_enc: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    relaunch_of_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="SET NULL"), nullable=True)
 
 class JobEvent(Base):
     __tablename__ = "job_events"
@@ -150,6 +158,18 @@ class Schedule(Base):
     redbeat_key: Mapped[str] = mapped_column(String, nullable=False)
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_job_run_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="SET NULL"), nullable=True)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    kind: Mapped[NotificationKind] = mapped_column(Enum(NotificationKind), nullable=False)
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    on_success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    on_failure: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    on_approval_needed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
 
 class Commit(Base):

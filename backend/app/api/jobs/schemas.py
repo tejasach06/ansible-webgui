@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from pydantic import BaseModel
 
@@ -14,13 +14,19 @@ class JobRequest(BaseModel):
     tags: Optional[str] = None
     skip_tags: Optional[str] = None
     extra_vars: dict = {}
+    survey_answers: dict = {}
     verbosity: int = 0
     forks: int = 5
     become: bool = False
     become_user: Optional[str] = None
     become_method: Optional[str] = None
+    diff: bool = False
     credential_ids: List[int] = []
 
 
 class ApproveRequest(BaseModel):
     approval_note: Optional[str] = None
+
+class RelaunchRequest(BaseModel):
+    hosts: Literal["all", "failed"] = "all"
+    mode: Optional[JobMode] = None

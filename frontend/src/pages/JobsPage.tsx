@@ -1,8 +1,197 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useJobs, useJob, useLaunchJob } from "../api/jobs"; import { useTemplates } from "../api/templates"; import { usePlaybooks } from "../api/playbooks"; import { useInventories } from "../api/inventories"; import { useCredentials } from "../api/credentials"; import { useAuth } from "../lib/auth"; import { Button } from "../components/Button"; import { Drawer } from "../components/Drawer"; import { DataTable } from "../components/DataTable"; import { StatusPill } from "../components/StatusPill"; import { TextArea, TextInput, Select, NumberInput, Checkbox } from "../components/Field"; import { ErrorBanner } from "../components/ErrorBanner"; import { Pagination } from "../components/Pagination"; import type { JobListItem, JobMode, JobStatus } from "../lib/types"; import { TERMINAL_JOB_STATUSES } from "../lib/types";
-const statuses:JobStatus[]=["pending_approval","approved","rejected","queued","running","successful","failed","canceled","timed_out"];
-const init={template_id:"",playbook_id:"",inventory_id:"",mode:"check" as JobMode,limit:"",tags:"",skip_tags:"",verbosity:0,forks:5,become:false,become_user:"",become_method:"",credential_ids:[] as number[],extra_vars:"{}"};
-function parseExtra(v:string){try{const parsed=JSON.parse(v); return parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:null}catch{return null}}
-export function JobsPage(){const {can}=useAuth(); const nav=useNavigate(); const limit=50; const [offset,setOffset]=useState(0); const [status,setStatus]=useState<JobStatus|"">(""); const [open,setOpen]=useState(false); const [form,setForm]=useState(init); const [extraError,setExtraError]=useState(""); const [relaunchId,setRelaunchId]=useState<number>(); const first=useRef<HTMLSelectElement>(null); const jobs=useJobs(limit,offset,status||undefined); const templates=useTemplates(); const playbooks=usePlaybooks(); const inventories=useInventories(); const credentials=useCredentials(); const launch=useLaunchJob(); const relaunch=useJob(relaunchId??0,!!relaunchId); useEffect(()=>{if(relaunch.data?.params_snapshot){const p=relaunch.data.params_snapshot; setForm({...init,template_id:String(relaunch.data.template_id??""),playbook_id:String(relaunch.data.playbook_id),inventory_id:String(relaunch.data.inventory_id),mode:(p.mode as JobMode)??"check",limit:String(p.limit??""),tags:String(p.tags??""),skip_tags:String(p.skip_tags??""),verbosity:Number(p.verbosity??0),forks:Number(p.forks??5),become:Boolean(p.become),become_user:String(p.become_user??""),become_method:String(p.become_method??""),credential_ids:Array.isArray(p.credential_ids)?p.credential_ids as number[]:[],extra_vars:JSON.stringify(p.extra_vars??{},null,2)}); setOpen(true)}},[relaunch.data]); const close=()=>{setOpen(false);setForm(init);setExtraError("");setRelaunchId(undefined)}; const pickTemplate=(id:string)=>{const t=templates.data?.find(x=>String(x.id)===id); setForm({...form,template_id:id,playbook_id:t?String(t.playbook_id):form.playbook_id,inventory_id:t?String(t.inventory_id):form.inventory_id})}; const submit=()=>{const extra_vars=parseExtra(form.extra_vars); if(!extra_vars){setExtraError("Extra vars must be a JSON object, for example {}");return} launch.mutate({template_id:form.template_id?Number(form.template_id):null,playbook_id:Number(form.playbook_id),inventory_id:Number(form.inventory_id),mode:form.mode,limit:form.limit||null,tags:form.tags||null,skip_tags:form.skip_tags||null,extra_vars,verbosity:Number(form.verbosity),forks:Number(form.forks),become:form.become,become_user:form.become_user||null,become_method:form.become_method||null,credential_ids:form.credential_ids},{onSuccess:r=>{close();nav(`/jobs/${r.id}`)}})}; const valid=form.playbook_id&&form.inventory_id; return <section className="grid gap-4"><div className="flex items-center justify-between"><h1 className="text-xl font-semibold">Jobs</h1>{can("job.request")&&<Button onClick={()=>setOpen(true)}>Launch job</Button>}</div><Select id="status" label="Status filter" value={status} onChange={e=>{setStatus(e.target.value as JobStatus|"");setOffset(0)}}><option value="">All</option>{statuses.map(s=><option key={s} value={s}>{s}</option>)}</Select>{(jobs.error||launch.error)&&<ErrorBanner error={jobs.error||launch.error}/>}<DataTable<JobListItem> rows={jobs.data?.items??[]} loading={jobs.isLoading} empty="No jobs" columns={[{key:"id",header:"ID",render:r=><Link className="underline" to={`/jobs/${r.id}`}>#{r.id}</Link>},{key:"status",header:"Status",render:r=><StatusPill status={r.status}/>},{key:"mode",header:"Mode",render:r=>r.mode},{key:"created",header:"Created",render:r=>r.created_at},{key:"actions",header:"Actions",render:r=><div className="flex gap-2"><Button size="sm" variant="secondary" onClick={()=>nav(`/jobs/${r.id}`)}>Open</Button>{TERMINAL_JOB_STATUSES.includes(r.status)&&<Button size="sm" variant="secondary" onClick={()=>setRelaunchId(r.id)}>Relaunch</Button>}</div>}]}/>{jobs.data&&<Pagination offset={offset} limit={limit} total={jobs.data.total} onChange={setOffset}/>}<Drawer open={open} onClose={close} title={relaunchId?"Relaunch job":"Launch job"} initialFocusRef={first} footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={close}>Cancel</Button><Button disabled={!valid} loading={launch.isPending} onClick={submit}>Launch</Button></div>}><div className="grid gap-3"><Select ref={first} id="job-template" label="Template" value={form.template_id} onChange={e=>pickTemplate(e.target.value)}><option value="">No template</option>{templates.data?.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</Select><Select id="job-playbook" label="Playbook" value={form.playbook_id} disabled={!!form.template_id} onChange={e=>setForm({...form,playbook_id:e.target.value})}><option value="">Select playbook</option>{playbooks.data?.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</Select><Select id="job-inventory" label="Inventory" value={form.inventory_id} disabled={!!form.template_id} onChange={e=>setForm({...form,inventory_id:e.target.value})}><option value="">Select inventory</option>{inventories.data?.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</Select><Select id="job-mode" label="Mode" value={form.mode} disabled={can("job.run_check")&&!can("job.request")} onChange={e=>setForm({...form,mode:e.target.value as JobMode})}><option value="check">check</option><option value="live">live</option></Select><TextInput id="job-limit" label="Limit" value={form.limit} onChange={e=>setForm({...form,limit:e.target.value})}/><TextInput id="job-tags" label="Tags" value={form.tags} onChange={e=>setForm({...form,tags:e.target.value})}/><TextInput id="job-skip" label="Skip tags" value={form.skip_tags} onChange={e=>setForm({...form,skip_tags:e.target.value})}/><NumberInput id="job-verbosity" label="Verbosity" min={0} max={4} value={form.verbosity} onChange={e=>setForm({...form,verbosity:Number(e.target.value)})}/><NumberInput id="job-forks" label="Forks" value={form.forks} onChange={e=>setForm({...form,forks:Number(e.target.value)})}/><Checkbox id="job-become" label="Become" checked={form.become} onChange={e=>setForm({...form,become:e.target.checked})}/><TextInput id="job-become-user" label="Become user" value={form.become_user} onChange={e=>setForm({...form,become_user:e.target.value})}/><TextInput id="job-become-method" label="Become method" value={form.become_method} onChange={e=>setForm({...form,become_method:e.target.value})}/><div className="grid gap-1"><span className="text-sm font-medium">Credentials</span>{credentials.data?.map(c=><Checkbox key={c.id} id={`job-cred-${c.id}`} label={c.name} checked={form.credential_ids.includes(c.id)} onChange={e=>setForm({...form,credential_ids:e.target.checked?[...form.credential_ids,c.id]:form.credential_ids.filter(id=>id!==c.id)})}/>)}</div><TextArea id="job-extra" label="Extra vars" value={form.extra_vars} error={extraError} onChange={e=>{setExtraError("");setForm({...form,extra_vars:e.target.value})}}/></div></Drawer></section>}
+import { useCancelJob, useJob, useJobs, useLaunchJob } from "../api/jobs";
+import { useTemplates } from "../api/templates";
+import { Button } from "../components/Button";
+import { DataTable } from "../components/DataTable";
+import { Drawer } from "../components/Drawer";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { buildLaunchBody, init, JobLaunchForm, surveyComplete } from "../components/JobLaunchForm";
+import { Pagination } from "../components/Pagination";
+import { Select } from "../components/Field";
+import { StatusPill } from "../components/StatusPill";
+import { useToast } from "../components/Toast";
+import { useAuth } from "../lib/auth";
+import type { JobListItem, JobMode, JobStatus } from "../lib/types";
+import { TERMINAL_JOB_STATUSES } from "../lib/types";
+
+const statuses: JobStatus[] = ["pending_approval", "approved", "rejected", "queued", "running", "successful", "failed", "canceled", "timed_out"];
+
+export function JobsPage() {
+  const { can } = useAuth();
+  const { toast } = useToast();
+  const nav = useNavigate();
+  const limit = 50;
+  const [offset, setOffset] = useState(0);
+  const [status, setStatus] = useState<JobStatus | "">("");
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(init);
+  const [extraError, setExtraError] = useState("");
+  const [relaunchId, setRelaunchId] = useState<number>();
+  const [cancelTarget, setCancelTarget] = useState<JobListItem>();
+  const first = useRef<HTMLSelectElement>(null);
+  const jobs = useJobs(limit, offset, status || undefined);
+  const templates = useTemplates();
+  const launch = useLaunchJob();
+  const cancelJob = useCancelJob();
+  const relaunch = useJob(relaunchId ?? 0, !!relaunchId);
+
+  useEffect(() => {
+    if (relaunch.data?.params_snapshot) {
+      const p = relaunch.data.params_snapshot;
+      setForm({
+        ...init,
+        template_id: String(relaunch.data.template_id ?? ""),
+        playbook_id: String(relaunch.data.playbook_id),
+        inventory_id: String(relaunch.data.inventory_id),
+        mode: (p.mode as JobMode) ?? "check",
+        limit: String(p.limit ?? ""),
+        tags: String(p.tags ?? ""),
+        skip_tags: String(p.skip_tags ?? ""),
+        verbosity: Number(p.verbosity ?? 0),
+        forks: Number(p.forks ?? 5),
+        become: Boolean(p.become),
+        become_user: String(p.become_user ?? ""),
+        become_method: String(p.become_method ?? ""),
+        credential_ids: Array.isArray(p.credential_ids) ? (p.credential_ids as number[]) : [],
+        extra_vars: JSON.stringify(p.extra_vars ?? {}, null, 2),
+        diff: Boolean(p.diff),
+        survey_answers: {},
+      });
+      setOpen(true);
+    }
+  }, [relaunch.data]);
+
+  const close = () => {
+    setOpen(false);
+    setForm(init);
+    setExtraError("");
+    setRelaunchId(undefined);
+  };
+
+  const pickTemplate = (id: string) => {
+    const t = templates.data?.find((x) => String(x.id) === id);
+    setForm({ ...form, template_id: id, playbook_id: t ? String(t.playbook_id) : form.playbook_id, inventory_id: t ? String(t.inventory_id) : form.inventory_id, credential_ids: t ? t.credential_ids : form.credential_ids, diff: t?.diff_mode ?? form.diff, survey_answers: {} });
+  };
+
+  const submit = () => {
+    const body = buildLaunchBody(form);
+    if (!body) {
+      setExtraError("Extra vars must be a JSON object, for example {}");
+      return;
+    }
+    launch.mutate(body, {
+      onSuccess: (r) => {
+        close();
+        nav(`/jobs/${r.id}`);
+      },
+    });
+  };
+
+  const selectedTemplate = templates.data?.find((x) => String(x.id) === form.template_id);
+  const valid = form.playbook_id && form.inventory_id && surveyComplete(form, selectedTemplate?.survey_spec);
+
+  return (
+    <section className="grid gap-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Jobs</h1>
+        {can("job.request") && <Button onClick={() => setOpen(true)}>Launch job</Button>}
+      </div>
+      <Select
+        id="status"
+        label="Status filter"
+        value={status}
+        onChange={(e) => {
+          setStatus(e.target.value as JobStatus | "");
+          setOffset(0);
+        }}
+      >
+        <option value="">All</option>
+        {statuses.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </Select>
+      {(jobs.error || launch.error || cancelJob.error) && <ErrorBanner error={jobs.error || launch.error || cancelJob.error} />}
+      <DataTable<JobListItem>
+        rows={jobs.data?.items ?? []}
+        loading={jobs.isLoading}
+        empty="No jobs"
+        columns={[
+          { key: "id", header: "ID", render: (r) => <Link className="underline" to={`/jobs/${r.id}`}>#{r.id}</Link> },
+          { key: "status", header: "Status", render: (r) => <StatusPill status={r.status} /> },
+          { key: "mode", header: "Mode", render: (r) => r.mode },
+          { key: "created", header: "Created", render: (r) => r.created_at },
+          {
+            key: "actions",
+            header: "Actions",
+            render: (r) => (
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => nav(`/jobs/${r.id}`)}>
+                  Open
+                </Button>
+                {can("job.cancel") && !TERMINAL_JOB_STATUSES.includes(r.status) && (
+                  <Button size="sm" variant="danger" onClick={() => setCancelTarget(r)}>
+                    Cancel
+                  </Button>
+                )}
+                {TERMINAL_JOB_STATUSES.includes(r.status) && (
+                  <Button size="sm" variant="secondary" onClick={() => setRelaunchId(r.id)}>
+                    Relaunch
+                  </Button>
+                )}
+              </div>
+            ),
+          },
+        ]}
+      />
+      {jobs.data && <Pagination offset={offset} limit={limit} total={jobs.data.total} onChange={setOffset} />}
+      <ConfirmDialog
+        open={!!cancelTarget}
+        title="Cancel job"
+        name={`#${cancelTarget?.id}`}
+        loading={cancelJob.isPending}
+        onClose={() => setCancelTarget(undefined)}
+        onConfirm={() =>
+          cancelTarget &&
+          cancelJob.mutate(cancelTarget.id, {
+            onSuccess: () => {
+              setCancelTarget(undefined);
+              toast("Job canceled");
+            },
+          })
+        }
+      />
+      <Drawer
+        open={open}
+        onClose={close}
+        title={relaunchId ? "Relaunch job" : "Launch job"}
+        initialFocusRef={first}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={close}>
+              Cancel
+            </Button>
+            <Button disabled={!valid} loading={launch.isPending} onClick={submit}>
+              Launch
+            </Button>
+          </div>
+        }
+      >
+        <JobLaunchForm
+          form={form}
+          setForm={setForm}
+          extraError={extraError}
+          setExtraError={setExtraError}
+          firstRef={first}
+          onTemplateChange={pickTemplate}
+          onNewInventory={() => undefined}
+        />
+      </Drawer>
+    </section>
+  );
+}
+
 export default JobsPage;
