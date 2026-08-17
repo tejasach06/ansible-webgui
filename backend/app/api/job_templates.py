@@ -4,9 +4,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.db.session import get_db
-from app.db.models import Credential, JobTemplate, Schedule, User
+from app.db.models import Credential, JobTemplate, Schedule, User, Inventory
 from app.api.auth import get_current_user
-from app.services.rbac_scope import assert_project_perm, visible_project_ids
+from app.services.rbac_scope import assert_project_perm, visible_project_ids, inventory_visible_to_project
 from app.services.surveys import validate_survey_spec
 from app.services.audit import audit
 
@@ -27,7 +27,7 @@ class JobTemplateCreate(BaseModel):
     name: str
     description: Optional[str] = None
     playbook_id: int
-    inventory_id: int
+    inventory_id: Optional[int] = None
     limit_pattern: Optional[str] = None
     tags: Optional[str] = None
     skip_tags: Optional[str] = None
@@ -121,6 +121,12 @@ async def create_template(
 ):
     await assert_project_perm(db, user, req.project_id, "content.write")
     await _reject_credential_user_conflict(db, req.credential_ids)
+    if req.inventory_id is not None:
+        inv = (await db.execute(select(Inventory).where(Inventory.id == req.inventory_id))).scalar_one_or_none()
+        if not inv:
+            raise HTTPException(status_code=404, detail={"code": "inventory_not_found", "message": "Inventory not found"})
+        if not inventory_visible_to_project(inv, req.project_id):
+            raise HTTPException(status_code=422, detail={"code": "inventory_not_in_project", "message": "That inventory belongs to another project"})
     try:
         validate_survey_spec(req.survey_spec)
     except ValueError as e:
@@ -146,6 +152,15 @@ async def update_template(
     data = req.model_dump(exclude_unset=True)
     if "credential_ids" in data:
         await _reject_credential_user_conflict(db, data["credential_ids"])
+    if "inventory_id" in data:
+        if data["inventory_id"] == 0:
+            data["inventory_id"] = None
+        elif data["inventory_id"] is not None:
+            inv = (await db.execute(select(Inventory).where(Inventory.id == data["inventory_id"]))).scalar_one_or_none()
+            if not inv:
+                raise HTTPException(status_code=404, detail={"code": "inventory_not_found", "message": "Inventory not found"})
+            if not inventory_visible_to_project(inv, t.project_id):
+                raise HTTPException(status_code=422, detail={"code": "inventory_not_in_project", "message": "That inventory belongs to another project"})
     if "survey_spec" in data:
         try:
             validate_survey_spec(data["survey_spec"])

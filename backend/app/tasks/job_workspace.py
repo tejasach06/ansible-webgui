@@ -89,6 +89,9 @@ def materialize_credentials(db, temp_dir: str, credential_ids: list[int], snapsh
             elif c.kind == "ssh_password":
                 passwords[r"^SSH password:\s*?$"] = dec
                 need_ask_pass = True
+                if c.become_same_as_ssh:
+                    passwords[r"^BECOME password.*:\s*?$"] = dec
+                    need_ask_become_pass = True
             elif c.kind == "become_password":
                 passwords[r"^BECOME password.*:\s*?$"] = dec
                 need_ask_become_pass = True

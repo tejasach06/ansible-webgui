@@ -7,6 +7,7 @@ import { useInventories } from "../api/inventories";
 import { useCredentials } from "../api/credentials";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
+import { Section } from "./Section";
 import { Drawer } from "./Drawer";
 import { DataTable } from "./DataTable";
 import { TextArea, TextInput, Checkbox, Select, NumberInput } from "./Field";
@@ -159,14 +160,15 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
   };
 
   return (
-    <section className="grid gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Job Templates</h2>
-        <Button icon={<Plus size={16} />} onClick={() => setOpen(true)}>
+    <Section
+      title="Job Templates"
+      divider={false}
+      actions={
+        <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={() => setOpen(true)}>
           Create template
         </Button>
-      </div>
-
+      }
+    >
       {(list.error || create.error || update.error || del.error) && (
         <ErrorBanner error={list.error || create.error || update.error || del.error} />
       )}
@@ -177,7 +179,7 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
         empty={<p className="p-4 text-sm text-zinc-500">No job templates created yet.</p>}
         columns={[
           { key: "name", header: "Name", render: (r) => r.name },
-          { key: "desc", header: "Description", render: (r) => r.description || "—" },
+          { key: "desc", header: "Description", render: (r) => r.description || "-" },
           { key: "approval", header: "Requires approval", render: (r) => (r.requires_approval ? "Yes" : "No") },
           {
             key: "actions",
@@ -258,7 +260,7 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
                 <Checkbox
                   key={c.id}
                   id={`cred-${c.id}`}
-                  label={`${c.name} (${c.kind})`}
+                  label={`${c.name} — ${c.kind}${c.username ? ` (user: ${c.username})` : ""}`}
                   checked={form.credential_ids.includes(c.id)}
                   onChange={(e) => {
                     const next = e.target.checked
@@ -291,6 +293,6 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
           </fieldset>
         </div>
       </Drawer>
-    </section>
+    </Section>
   );
 }

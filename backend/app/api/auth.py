@@ -12,6 +12,7 @@ from app.core.rbac import get_user_permissions, get_project_permissions
 from app.db.models import ProjectMembership
 from app.core.config import settings
 from app.services.audit import audit
+from app.services.rbac_scope import has_inventory_write
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -199,4 +200,5 @@ async def get_me(user: User = Depends(get_current_user), db: AsyncSession = Depe
         "roles": roles,
         "perms": perms,
         "project_perms": project_perms,
+        "inventory_write": await has_inventory_write(db, user),
     }

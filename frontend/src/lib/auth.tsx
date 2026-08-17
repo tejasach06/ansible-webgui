@@ -10,6 +10,8 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   can: (perm: string) => boolean;
   canInProject: (projectId: number, perm: string) => boolean;
+  canAny: (perm: string) => boolean;
+  canInventoryWrite: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -18,7 +20,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { data: user, isLoading } = useQuery({ queryKey: ["me"], queryFn: () => apiFetch<Me>("/api/me"), retry: false, staleTime: 60000 });
   const value = useMemo<AuthContextValue>(() => {
-    const can = (perm: string) => user?.perms.includes(perm) ?? false;
+    const can = (perm: string) => (user?.perms.includes(perm) ?? false) || (user?.perms.includes("system.admin") ?? false);
+    const canAny = (perm: string) => can("system.admin") || Object.values(user?.project_perms ?? {}).some((perms) => perms.includes(perm));
+    const canInventoryWrite = user?.inventory_write ?? false;
     return {
       user,
       isLoading,
@@ -33,6 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       can,
       canInProject: (projectId: number, perm: string) => can("system.admin") || (user?.project_perms?.[String(projectId)]?.includes(perm) ?? false),
+      canAny,
+      canInventoryWrite,
     };
   }, [user, isLoading, queryClient]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

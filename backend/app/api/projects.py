@@ -5,9 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.db.session import get_db
-from app.db.models import Project, Playbook, JobRun, JobStatus, User, ProjectMembership, ProjectRole
+from app.db.models import Project, Playbook, JobRun, JobStatus, User, ProjectMembership, ProjectRole, Inventory
 from app.api.auth import require, require_project
-from app.services.rbac_scope import visible_project_ids
+from app.services.rbac_scope import visible_project_ids, inventory_visible_to_project
 from app.services.audit import audit
 from app.services.content import init_project_repo, get_project_repo_path
 from app.core.config import settings
@@ -20,10 +20,20 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     default_branch: Optional[str] = None
+    default_inventory_id: Optional[int] = None
+
 class MemberRoleUpdate(BaseModel):
     role: ProjectRole
+
 def _project_response(p: Project):
-    return {"id": p.id, "name": p.name, "git_path": p.git_path, "default_branch": p.default_branch, "is_inventory_repo": p.name == settings.INVENTORY_REPO_NAME}
+    return {
+        "id": p.id,
+        "name": p.name,
+        "git_path": p.git_path,
+        "default_branch": p.default_branch,
+        "default_inventory_id": p.default_inventory_id,
+        "is_inventory_repo": p.name == settings.INVENTORY_REPO_NAME,
+    }
 
 def _validate_project_name(name: str) -> None:
     if name in {".", ".."} or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name):
@@ -115,6 +125,17 @@ async def update_project(
         p.git_path = str(new)
     if req.default_branch is not None:
         p.default_branch = req.default_branch
+    if req.default_inventory_id is not None:
+        if req.default_inventory_id == 0:
+            p.default_inventory_id = None
+        else:
+            inv = (await db.execute(select(Inventory).where(Inventory.id == req.default_inventory_id))).scalar_one_or_none()
+            if not inv:
+                raise HTTPException(status_code=404, detail={"code": "inventory_not_found", "message": "Inventory not found"})
+            if not inventory_visible_to_project(inv, project_id):
+                raise HTTPException(status_code=422, detail={"code": "inventory_not_in_project", "message": "That inventory belongs to another project"})
+            p.default_inventory_id = req.default_inventory_id
+        await audit(db, "project_default_inventory_set", actor_user_id=user.id, object_type="project", object_id=project_id, detail={"inventory_id": p.default_inventory_id})
 
     await db.commit()
     await db.refresh(p)

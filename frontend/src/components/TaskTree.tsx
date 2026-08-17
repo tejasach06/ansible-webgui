@@ -11,7 +11,7 @@ function duration(ms: number) {
 export function TaskTree({ data, onJump }: { data?: JobReport; onJump: (counter: number) => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [slowestFirst, setSlowestFirst] = useState(false);
-  if (!data?.plays.length) return <p className="text-sm text-zinc-500">No task events yet.</p>;
+  if (!data?.plays.length) return <p className="text-sm text-zinc-500 dark:text-zinc-400">No task events yet.</p>;
 
   return (
     <div className="grid gap-3">
@@ -28,22 +28,22 @@ export function TaskTree({ data, onJump }: { data?: JobReport; onJump: (counter:
           <div key={key} className="rounded-lg border border-zinc-200 dark:border-zinc-800">
             <button className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left font-medium" onClick={() => setOpen({ ...open, [key]: !shown })}>
               <span>{shown ? "▾" : "▸"} {play.name ?? "Play"}</span>
-              <span className="text-xs font-normal text-zinc-500">{duration(play.duration_ms)}</span>
+              <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">{duration(play.duration_ms)}</span>
             </button>
             {shown && (
               <div className="grid gap-2 p-3">
                 {tasks.map((task) => (
-                  <div key={task.uuid ?? task.name ?? task.action} className="grid gap-2 rounded border border-zinc-100 p-2 text-sm dark:border-zinc-800">
+                  <div key={task.uuid ?? task.name ?? task.action} className="grid gap-2 rounded-md border border-zinc-100 p-2 text-sm dark:border-zinc-800">
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <div className="font-medium">{task.name ?? "Task"}</div>
-                        <div className="text-xs text-zinc-500">{task.action ?? "—"} · {duration(task.duration_ms)}</div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">{task.action ?? "-"} · {duration(task.duration_ms)}</div>
                       </div>
                       {task.first_failure_counter && <Button size="sm" variant="secondary" onClick={() => onJump(task.first_failure_counter!)}>First failure</Button>}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {Object.entries(task.results).map(([status, count]) => (
-                        <span key={status} className={count && ["failed", "unreachable"].includes(status) ? "rounded bg-red-100 px-2 py-1 text-xs text-red-800 dark:bg-red-950 dark:text-red-200" : "rounded bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-800"}>
+                        <span key={status} className={count && ["failed", "unreachable"].includes(status) ? "rounded-md bg-red-100 px-2 py-1 text-xs text-red-800 dark:bg-red-950 dark:text-red-200" : "rounded-md bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-800"}>
                           {status}: {count}
                         </span>
                       ))}

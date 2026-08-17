@@ -4,6 +4,8 @@ import { apiFetch } from "../lib/api";
 import type { ProjectMember } from "../lib/types";
 import { useAuth } from "../lib/auth";
 import { Button } from "./Button";
+import { Section } from "./Section";
+import { TextInput, Select } from "./Field";
 import { DataTable } from "./DataTable";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyState } from "./EmptyState";
@@ -49,28 +51,17 @@ export function MembersPanel({ projectId }: { projectId: number }) {
   };
 
   return (
-    <section className="grid gap-4">
-      <div>
-        <h2 className="text-lg font-semibold">Members</h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Manage project-scoped access.</p>
-      </div>
-
+    <Section title="Members" divider={false}>
       {canAdmin && (
-        <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <div>
-            <label htmlFor="member-user-id" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">User ID</label>
-            <input id="member-user-id" type="number" value={newUserId} onChange={(e) => setNewUserId(e.target.value)} placeholder="e.g. 2" className="mt-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950" required />
-          </div>
-          <div>
-            <label htmlFor="member-role" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">Role</label>
-            <select id="member-role" value={newRole} onChange={(e) => setNewRole(e.target.value as ProjectMember["role"])} className="mt-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950">
-              <option value="owner">Owner</option>
-              <option value="maintainer">Maintainer</option>
-              <option value="developer">Developer</option>
-              <option value="operator">Operator</option>
-              <option value="viewer">Viewer</option>
-            </select>
-          </div>
+        <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-900">
+          <TextInput id="member-user-id" label="User ID" type="number" value={newUserId} onChange={(e) => setNewUserId(e.target.value)} placeholder="e.g. 2" required />
+          <Select id="member-role" label="Role" value={newRole} onChange={(e) => setNewRole(e.target.value as ProjectMember["role"])}>
+            <option value="owner">Owner</option>
+            <option value="maintainer">Maintainer</option>
+            <option value="developer">Developer</option>
+            <option value="operator">Operator</option>
+            <option value="viewer">Viewer</option>
+          </Select>
           <Button type="submit" size="sm" loading={upsertMutation.isPending}>Add / Update member</Button>
         </form>
       )}
@@ -89,7 +80,7 @@ export function MembersPanel({ projectId }: { projectId: number }) {
             header: "Role",
             render: (m) =>
               canAdmin ? (
-                <select value={m.role} onChange={(e) => upsertMutation.mutate({ userId: m.user_id, role: e.target.value as ProjectMember["role"] })} className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
+                <select value={m.role} onChange={(e) => upsertMutation.mutate({ userId: m.user_id, role: e.target.value as ProjectMember["role"] })} className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
                   <option value="owner">Owner</option>
                   <option value="maintainer">Maintainer</option>
                   <option value="developer">Developer</option>
@@ -107,7 +98,7 @@ export function MembersPanel({ projectId }: { projectId: number }) {
           },
         ]}
       />
-    </section>
+    </Section>
   );
 }
 

@@ -5,6 +5,7 @@ import { useTemplates } from "../api/templates";
 import { useAuth } from "../lib/auth";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
+import { Section } from "./Section";
 import { DataTable } from "./DataTable";
 import { Drawer } from "./Drawer";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -42,16 +43,17 @@ export function SchedulesPanel({ projectId }: { projectId: number }) {
   const valid = form.template_id && form.name.trim() && form.cron_expr.trim() && form.timezone.trim();
 
   return (
-    <section className="grid gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Schedules</h2>
-        {canWrite && (
-          <Button icon={<Plus size={16} />} onClick={() => setOpen(true)}>
+    <Section
+      title="Schedules"
+      divider={false}
+      actions={
+        canWrite && (
+          <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={() => setOpen(true)}>
             Create schedule
           </Button>
-        )}
-      </div>
-
+        )
+      }
+    >
       {(list.error || create.error || update.error || del.error) && (
         <ErrorBanner error={list.error || create.error || update.error || del.error} />
       )}
@@ -163,6 +165,6 @@ export function SchedulesPanel({ projectId }: { projectId: number }) {
           })
         }
       />
-    </section>
+    </Section>
   );
 }

@@ -1,7 +1,7 @@
 import type { OverrideValue } from "../lib/types";
 
 function formatValue(value: unknown) {
-  if (value === null || value === undefined || value === "") return "—";
+  if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value, null, 2);
 }

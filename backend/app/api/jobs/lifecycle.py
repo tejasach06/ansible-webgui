@@ -10,17 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import require, get_current_user
 from app.api.jobs.schemas import ApproveRequest, JobRequest, RelaunchRequest
 from app.core.config import settings
-from app.db.models import Credential, Inventory, JobEvent, JobMode, JobRun, JobStatus, JobTemplate, Playbook, Project, User, JobHostResult, HostResultStatus, PipelineRun, PipelineStep, PipelineStatus, ProjectMembership
+from app.db.models import Credential, CredentialKind, Inventory, JobEvent, JobMode, JobRun, JobStatus, JobTemplate, Playbook, Project, User, JobHostResult, HostResultStatus, PipelineRun, PipelineStep, PipelineStatus, ProjectMembership
 from app.db.session import get_db
 from app.services.approvals import approve_job_run, freeze_params_snapshot
 from app.services.audit import audit
 from app.services.content import get_inventory_repo_path, get_project_repo_path
 from app.services.credentials import encrypt_payload
-from app.services.rbac_scope import assert_project_perm, _user_global_perms
+from app.services.rbac_scope import assert_project_perm, _user_global_perms, inventory_visible_to_project
 from app.services.launch import resolve_launch
-from app.services.rbac_scope import assert_project_perm
+from app.services.surveys import apply_survey
 from app.tasks.run_job import run_job
-
 router = APIRouter()
 
 
@@ -76,19 +75,34 @@ async def request_job(
 
     inventory_id = effective["inventory_id"]
     if not inventory_id:
-        raise HTTPException(status_code=422, detail={"code": "inventory_required", "message": "inventory_id is required"})
-
+        project_row = (await db.execute(select(Project).where(Project.id == playbook.project_id))).scalar_one_or_none()
+        inventory_id = project_row.default_inventory_id if project_row else None
+    if not inventory_id:
+        raise HTTPException(status_code=422, detail={"code": "inventory_required", "message": "No inventory given and this project has no default inventory"})
     inventory = (await db.execute(select(Inventory).where(Inventory.id == inventory_id))).scalar_one_or_none()
     if not inventory:
         raise HTTPException(status_code=404, detail={"code": "inventory_not_found", "message": "Inventory not found"})
-
+    if not inventory_visible_to_project(inventory, playbook.project_id):
+        raise HTTPException(status_code=422, detail={"code": "inventory_not_in_project", "message": "That inventory belongs to another project"})
     cred_ids = effective["credential_ids"]
     if cred_ids:
-        rows = (await db.execute(select(Credential.name, Credential.username).where(Credential.id.in_(cred_ids), Credential.username.isnot(None)))).all()
-        usernames = {username for _, username in rows}
+        rows = (await db.execute(
+            select(Credential.name, Credential.username, Credential.project_id, Credential.kind, Credential.become_same_as_ssh)
+            .where(Credential.id.in_(cred_ids))
+        )).all()
+        user_rows = [(name, username) for name, username, _, _, _ in rows if username is not None]
+        usernames = {username for _, username in user_rows}
         if len(usernames) > 1:
-            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set different usernames", "credentials": [name for name, _ in rows]})
+            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set different usernames", "credentials": [name for name, _ in user_rows]})
 
+        offending = [name for name, _, pid, _, _ in rows if pid != playbook.project_id]
+        if offending:
+            raise HTTPException(status_code=422, detail={"code": "credential_not_in_project", "message": "That credential belongs to another project", "credentials": offending})
+
+        has_become_same = any(become_same for _, _, _, _, become_same in rows)
+        has_become_pass = any(kind == CredentialKind.become_password for _, _, _, kind, _ in rows)
+        if has_become_same and has_become_pass:
+            raise HTTPException(status_code=422, detail={"code": "become_password_conflict", "message": "Selected credential already reuses the SSH password for become; remove the separate become password credential"})
     project = (await db.execute(select(Project).where(Project.id == playbook.project_id))).scalar_one_or_none()
     repo_path = get_project_repo_path(project.name)
     repo = Repo(repo_path)
@@ -236,7 +250,9 @@ async def approve_job(
     if playbook:
         await assert_project_perm(db, user, playbook.project_id, "job.approve")
 
-    note = req.approval_note if req else None
+    note = (req.approval_note or "").strip() if req else ""
+    if not note:
+        raise HTTPException(status_code=422, detail={"code": "approval_note_required", "message": "An approval note is required"})
     try:
         job = await approve_job_run(db, job, user.id, note)
     except ValueError as e:
@@ -259,7 +275,7 @@ async def approve_job(
         job.celery_task_id = task.id
         await db.commit()
 
-    await audit(db, "job_approved", actor_user_id=user.id, object_type="job_run", object_id=job.id)
+    await audit(db, "job_approved", actor_user_id=user.id, object_type="job_run", object_id=job.id, detail={"approval_note": note})
     return {"id": job.id, "status": job.status}
 
 

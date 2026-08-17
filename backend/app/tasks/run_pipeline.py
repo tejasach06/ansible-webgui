@@ -7,6 +7,7 @@ from app.tasks.worker import celery_app
 from app.db.session import SyncSessionLocal
 from app.db.models import PipelineRun, PipelineStep, PipelineStatus, JobRun, JobStatus, JobTemplate, Playbook, Inventory, Project
 from app.services.approvals import freeze_params_snapshot
+from app.services.rbac_scope import inventory_visible_to_project
 from app.services.content import get_project_repo_path, get_inventory_repo_path
 from app.core.config import settings
 from app.tasks.run_job import run_job
@@ -63,8 +64,14 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
                 return
 
             playbook = db.execute(select(Playbook).where(Playbook.id == tmpl.playbook_id)).scalar_one_or_none()
-            inventory = db.execute(select(Inventory).where(Inventory.id == tmpl.inventory_id)).scalar_one_or_none()
             project = db.execute(select(Project).where(Project.id == tmpl.project_id)).scalar_one_or_none()
+            effective_inventory_id = tmpl.inventory_id or (project.default_inventory_id if project else None)
+            inventory = db.execute(select(Inventory).where(Inventory.id == effective_inventory_id)).scalar_one_or_none() if effective_inventory_id else None
+            if not inventory or not inventory_visible_to_project(inventory, tmpl.project_id):
+                prun.status = PipelineStatus.failed
+                prun.finished_at = datetime.utcnow()
+                db.commit()
+                return
 
             snapshot_data = prun.params_snapshot or {}
             git_sha = snapshot_data.get("git_sha")
@@ -99,7 +106,7 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
                 child = JobRun(
                     template_id=tmpl.id,
                     playbook_id=tmpl.playbook_id,
-                    inventory_id=tmpl.inventory_id,
+                    inventory_id=effective_inventory_id,
                     mode="live",
                     status=child_status,
                     requested_by=prun.requested_by,

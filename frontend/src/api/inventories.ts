@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import type { Inventory, InventoryFile } from "../lib/types";
-export function useInventories() { return useQuery({ queryKey: ["inventories"], queryFn: () => apiFetch<Inventory[]>("/api/inventories") }); }
+export function useInventories(projectId?: number) { return useQuery({ queryKey: ["inventories", projectId ?? null], queryFn: () => apiFetch<Inventory[]>(projectId ? `/api/inventories?project_id=${projectId}` : "/api/inventories") }); }
 export function useCreateInventories() { const qc=useQueryClient(); return useMutation({ mutationFn: (body: unknown) => apiFetch<Inventory>("/api/inventories", { method:"POST", body: JSON.stringify(body) }), onSuccess: () => qc.invalidateQueries({ queryKey:["inventories"] }) }); }
 export function useDeleteInventories() { const qc=useQueryClient(); return useMutation({ mutationFn: (id:number) => apiFetch(`/api/inventories/${id}`, { method:"DELETE" }), onSuccess: () => qc.invalidateQueries({ queryKey:["inventories"] }) }); }
 export function useInventoryFile(id:number|undefined) { return useQuery({ queryKey:["inventories",id,"file"], enabled:!!id, queryFn:()=>apiFetch<InventoryFile>(`/api/inventories/${id}/file`) }); }
 export function useSaveInventoryFile(id:number) { const qc=useQueryClient(); return useMutation({ mutationFn:(body:unknown)=>apiFetch<{status:string;sha:string}>(`/api/inventories/${id}/file`, { method:"POST", body: JSON.stringify(body) }), onSuccess:()=>qc.invalidateQueries({ queryKey:["inventories",id,"file"] }) }); }
 export function useUpdateInventory(id:number) { const qc=useQueryClient(); return useMutation({ mutationFn:(body:unknown)=>apiFetch<Inventory>(`/api/inventories/${id}`, { method:"PATCH", body: JSON.stringify(body) }), onSuccess:()=>qc.invalidateQueries({ queryKey:["inventories"] }) }); }
+export function useVerifyInventory(id: number) { return useMutation({ mutationFn: () => apiFetch<{ hosts: string[]; groups: Record<string, string[]>; raw: unknown }>(`/api/inventories/${id}/verify`, { method: "POST" }) }); }

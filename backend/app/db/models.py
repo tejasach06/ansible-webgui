@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import (
-    String, Integer, SmallInteger, Boolean, DateTime, Enum, ForeignKey, UniqueConstraint, Table, Column, Text, LargeBinary, Index
+    String, Integer, SmallInteger, Boolean, DateTime, Enum, ForeignKey, UniqueConstraint, Table, Column, Text, LargeBinary, Index, func
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY, BIGINT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -90,7 +90,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     git_path: Mapped[str] = mapped_column(String, nullable=False)
     default_branch: Mapped[str] = mapped_column(String, default="main", nullable=False)
-
+    default_inventory_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("inventories.id", name="fk_projects_default_inventory", ondelete="SET NULL", use_alter=True), nullable=True)
 class ProjectMembership(Base):
     __tablename__ = "project_memberships"
     __table_args__ = (UniqueConstraint("project_id", "user_id"), Index("ix_project_memberships_user_id", "user_id"),)
@@ -102,11 +102,14 @@ class ProjectMembership(Base):
 
 class Inventory(Base):
     __tablename__ = "inventories"
+    __table_args__ = (
+        Index("uq_inventories_scope_name", func.coalesce(Column("project_id"), 0), "name", unique=True),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
     rel_path: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     format: Mapped[InventoryFormat] = mapped_column(Enum(InventoryFormat), nullable=False)
-
 class Credential(Base):
     __tablename__ = "credentials"
     __table_args__ = (UniqueConstraint("project_id", "name"),)
@@ -115,6 +118,8 @@ class Credential(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[CredentialKind] = mapped_column(Enum(CredentialKind), nullable=False)
     username: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    become_same_as_ssh: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    public_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     payload_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
 
@@ -133,7 +138,7 @@ class JobTemplate(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     playbook_id: Mapped[int] = mapped_column(Integer, ForeignKey("playbooks.id"), nullable=False)
-    inventory_id: Mapped[int] = mapped_column(Integer, ForeignKey("inventories.id"), nullable=False)
+    inventory_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("inventories.id"), nullable=True)
     limit_pattern: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     tags: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     skip_tags: Mapped[Optional[str]] = mapped_column(String, nullable=True)
