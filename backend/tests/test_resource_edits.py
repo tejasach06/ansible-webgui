@@ -3,7 +3,8 @@ from pathlib import Path
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.db.models import Credential, CredentialKind, Inventory, InventoryFormat, JobTemplate, Playbook, Project
+from app.core.security import hash_password
+from app.db.models import Credential, CredentialKind, Inventory, InventoryFormat, JobTemplate, Playbook, Project, ProjectMembership, ProjectRole, Role, User
 from app.services.content import get_project_repo_path, init_project_repo
 from app.services.credentials import decrypt_payload
 from test_content_api import login
@@ -124,6 +125,107 @@ async def test_request_job_allows_password_and_become_credentials_for_same_usern
 
     assert res.status_code != 422
 
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_credentials_no_project_id_filters_by_visible_projects(client, db):
+    project_a, _ = await _project_with_playbooks(db, "cred-vis-a")
+    project_b, _ = await _project_with_playbooks(db, "cred-vis-b")
+
+    c_a = Credential(project_id=project_a.id, name="cred-a", kind=CredentialKind.ssh_password, payload_enc=b"x", created_by=1)
+    c_b = Credential(project_id=project_b.id, name="cred-b", kind=CredentialKind.ssh_password, payload_enc=b"y", created_by=1)
+    db.add_all([c_a, c_b])
+
+    role_user = (await db.execute(select(Role).where(Role.name == "user"))).scalar_one_or_none()
+    if not role_user:
+        role_user = Role(name="user")
+        db.add(role_user)
+        await db.flush()
+
+    member_user = User(username="cred-member", email="cred-member@example.com", password_hash=hash_password("password123"), roles=[role_user])
+    db.add(member_user)
+    await db.flush()
+
+    membership = ProjectMembership(project_id=project_a.id, user_id=member_user.id, role=ProjectRole.viewer)
+    db.add(membership)
+    await db.commit()
+
+    # Login as member_user
+    login_res = await client.post("/api/auth/login", json={"username": "cred-member", "password": "password123"}, headers=MUTATE)
+    assert login_res.status_code == 200
+
+    res = await client.get("/api/credentials")
+    assert res.status_code == 200
+    names = [item["name"] for item in res.json()]
+    assert "cred-a" in names
+    assert "cred-b" not in names
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_create_credential_become_same_as_ssh_flag_validation(client, db):
+    await login(client)
+    project, _ = await _project_with_playbooks(db, "cred-become-flag-proj")
+
+    bad_res = await client.post(
+        "/api/credentials",
+        json={"project_id": project.id, "name": "bad-key", "kind": "ssh_key", "payload": "keydata", "become_same_as_ssh": True},
+        headers=MUTATE,
+    )
+    assert bad_res.status_code == 400
+    assert bad_res.json()["detail"]["code"] == "become_same_requires_ssh_password"
+
+    ok_res = await client.post(
+        "/api/credentials",
+        json={"project_id": project.id, "name": "ok-ssh-pass", "kind": "ssh_password", "payload": "passdata", "become_same_as_ssh": True},
+        headers=MUTATE,
+    )
+    assert ok_res.status_code == 200
+    assert ok_res.json()["become_same_as_ssh"] is True
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_request_job_rejects_credential_not_in_project(client, db):
+    await login(client)
+    project_a, _ = await _project_with_playbooks(db, "job-proj-a")
+    project_b, _ = await _project_with_playbooks(db, "job-proj-b")
+    playbook_a = Playbook(project_id=project_a.id, rel_path="playbooks/site.yml", name="site-a")
+    inv_a = await _inventory(db, "job-inv-a")
+    c_b = Credential(project_id=project_b.id, name="cred-other-proj", kind=CredentialKind.ssh_password, payload_enc=b"x", created_by=1)
+    db.add_all([playbook_a, c_b])
+    await db.commit()
+    await db.refresh(playbook_a)
+    await db.refresh(c_b)
+
+    res = await client.post(
+        "/api/jobs",
+        json={"playbook_id": playbook_a.id, "inventory_id": inv_a.id, "mode": "check", "credential_ids": [c_b.id]},
+        headers=MUTATE,
+    )
+    assert res.status_code == 422
+    assert res.json()["detail"]["code"] == "credential_not_in_project"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_request_job_rejects_become_password_conflict(client, db):
+    await login(client)
+    project, _ = await _project_with_playbooks(db, "job-become-conflict-proj")
+    playbook = Playbook(project_id=project.id, rel_path="playbooks/site.yml", name="site")
+    inv = await _inventory(db, "job-become-conflict-inv")
+    c1 = Credential(project_id=project.id, name="ssh-reused", kind=CredentialKind.ssh_password, become_same_as_ssh=True, payload_enc=b"x", created_by=1)
+    c2 = Credential(project_id=project.id, name="separate-become", kind=CredentialKind.become_password, payload_enc=b"y", created_by=1)
+    db.add_all([playbook, c1, c2])
+    await db.commit()
+    await db.refresh(playbook)
+    await db.refresh(c1)
+    await db.refresh(c2)
+
+    res = await client.post(
+        "/api/jobs",
+        json={"playbook_id": playbook.id, "inventory_id": inv.id, "mode": "check", "credential_ids": [c1.id, c2.id]},
+        headers=MUTATE,
+    )
+    assert res.status_code == 422
+    assert res.json()["detail"]["code"] == "become_password_conflict"
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_patch_playbook_repaths_existing_file_and_rejects_missing(client, db):

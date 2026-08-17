@@ -117,7 +117,7 @@ async def test_system_admin_bypasses_project_membership(client, db, monkeypatch)
 
     monkeypatch.setattr("app.api.jobs.lifecycle.run_job.delay", lambda _job_id: Task())
     await _login(client)
-    res = await client.post(f"/api/jobs/{job.id}/approve", json={}, headers=MUTATE)
+    res = await client.post(f"/api/jobs/{job.id}/approve", json={"approval_note": "approved by admin"}, headers=MUTATE)
 
     assert res.status_code == 200
     await db.refresh(job)

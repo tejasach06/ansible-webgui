@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.db.models import JobRun, JobStatus, JobEvent, JobPlay, JobTask, JobHostResult, Playbook, User, HostResultStatus
+from app.db.models import JobRun, JobStatus, JobEvent, JobPlay, JobTask, JobHostResult, Playbook, User, HostResultStatus, Project, Inventory, Credential, JobTemplate
 from app.api.auth import get_current_user, require
 from app.services.rbac_scope import visible_project_ids, assert_project_perm
 
@@ -171,4 +171,25 @@ async def get_job_detail(job_id: int, user: User = Depends(require("read")), db:
     job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
-    return {"id": job.id, "template_id": job.template_id, "playbook_id": job.playbook_id, "inventory_id": job.inventory_id, "mode": job.mode, "status": job.status, "requested_by": job.requested_by, "approved_by": job.approved_by, "approval_note": job.approval_note, "rc": job.rc, "stats": job.stats, "params_snapshot": job.params_snapshot, "overrides": (job.params_snapshot or {}).get("overrides", {}), "created_at": job.created_at.isoformat() if job.created_at else None, "started_at": job.started_at.isoformat() if job.started_at else None, "finished_at": job.finished_at.isoformat() if job.finished_at else None, "relaunch_of_id": job.relaunch_of_id}
+    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
+    project = (await db.execute(select(Project).where(Project.id == playbook.project_id))).scalar_one_or_none() if playbook else None
+    inventory = (await db.execute(select(Inventory).where(Inventory.id == job.inventory_id))).scalar_one_or_none() if job.inventory_id else None
+    template = (await db.execute(select(JobTemplate).where(JobTemplate.id == job.template_id))).scalar_one_or_none() if job.template_id else None
+    snap = job.params_snapshot or {}
+    cred_ids = snap.get("credential_ids") or []
+    creds = (await db.execute(select(Credential.id, Credential.name, Credential.kind, Credential.username).where(Credential.id.in_(cred_ids)))).all() if cred_ids else []
+    user_ids = [i for i in (job.requested_by, job.approved_by) if i]
+    names = dict((await db.execute(select(User.id, User.username).where(User.id.in_(user_ids)))).all()) if user_ids else {}
+
+    context = {
+        "project_name": project.name if project else None,
+        "playbook_name": playbook.name if playbook else None,
+        "playbook_rel_path": playbook.rel_path if playbook else None,
+        "inventory_name": inventory.name if inventory else None,
+        "inventory_rel_path": inventory.rel_path if inventory else None,
+        "template_name": template.name if template else None,
+        "requested_by_username": names.get(job.requested_by),
+        "approved_by_username": names.get(job.approved_by),
+        "credentials": [{"id": cid, "name": cname, "kind": ckind.value if hasattr(ckind, "value") else ckind, "username": cuser} for cid, cname, ckind, cuser in creds],
+    }
+    return {"id": job.id, "template_id": job.template_id, "playbook_id": job.playbook_id, "inventory_id": job.inventory_id, "mode": job.mode, "status": job.status, "requested_by": job.requested_by, "approved_by": job.approved_by, "approval_note": job.approval_note, "rc": job.rc, "stats": job.stats, "params_snapshot": job.params_snapshot, "overrides": (job.params_snapshot or {}).get("overrides", {}), "context": context, "created_at": job.created_at.isoformat() if job.created_at else None, "started_at": job.started_at.isoformat() if job.started_at else None, "finished_at": job.finished_at.isoformat() if job.finished_at else None, "relaunch_of_id": job.relaunch_of_id}

@@ -175,7 +175,7 @@ async def test_create_inventory_with_content_commits_file_and_returns_row(client
 
     assert res.status_code == 200
     body = res.json()
-    assert body == {"id": body["id"], "rel_path": "inventories/fresh.yml", "name": "fresh-inventory", "format": "yaml"}
+    assert body == {"id": body["id"], "rel_path": "inventories/fresh.yml", "name": "fresh-inventory", "format": "yaml", "project_id": None}
     assert (repo_path / "inventories" / "fresh.yml").read_text() == INVENTORY_YAML
     commit = (await db.execute(select(Commit).where(Commit.message == "Create fresh inventory"))).scalar_one()
     assert commit.project_id == project.id

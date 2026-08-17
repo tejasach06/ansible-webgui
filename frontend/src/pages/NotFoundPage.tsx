@@ -1,1 +1,11 @@
-export function NotFoundPage(){return <div className="rounded-lg border border-zinc-200 p-6 dark:border-zinc-800"><h1 className="text-xl font-semibold">Page not found</h1></div>} export default NotFoundPage;
+import { PageHeader } from "../components/PageHeader";
+
+export function NotFoundPage() {
+  return (
+    <section className="grid gap-4">
+      <PageHeader title="Page not found" subtitle="Check the URL, or return to the dashboard." />
+    </section>
+  );
+}
+
+export default NotFoundPage;

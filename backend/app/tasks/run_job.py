@@ -5,6 +5,7 @@ import tempfile
 import redis
 import ansible_runner
 from app.tasks.worker import celery_app
+from app.db.session import SyncSessionLocal
 from app.services.run_report import ReportBuilder
 from app.db.models import JobRun, JobStatus, JobEvent, Project, Playbook
 from app.tasks.job_workspace import export_inventory_snapshot, export_project_snapshot, materialize_credentials
@@ -59,24 +60,7 @@ def run_job(job_run_id: int):
             report_builder = ReportBuilder(job.id)
 
             def _flush_report():
-                plays, tasks, host_results = report_builder.pending()
-                if plays:
-                    db.add_all(plays)
-                    db.flush()
-                if tasks:
-                    for t in tasks:
-                        if getattr(t, "_play_obj", None) and hasattr(t._play_obj, "id") and t._play_obj.id:
-                            t.play_id = t._play_obj.id
-                    db.add_all(tasks)
-                    db.flush()
-                if host_results:
-                    for hr in host_results:
-                        if getattr(hr, "_task_obj", None) and hasattr(hr._task_obj, "id") and hr._task_obj.id:
-                            hr.task_id = hr._task_obj.id
-                    db.add_all(host_results)
-                    db.flush()
-                report_builder.clear()
-
+                report_builder.flush(db)
             def event_handler(event_data):
                 nonlocal event_counter, stats_from_event
                 event_counter += 1

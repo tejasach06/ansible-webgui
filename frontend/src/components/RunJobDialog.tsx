@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLaunchJob } from "../api/jobs";
 import { usePlaybooks } from "../api/playbooks";
+import { useProjects } from "../api/projects";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { EmptyState } from "./EmptyState";
@@ -11,7 +12,7 @@ import { buildLaunchBody, init, JobLaunchForm, type LaunchForm } from "./JobLaun
 import { useAuth } from "../lib/auth";
 import { useToast } from "./Toast";
 
-export function RunJobDialog({ open, onClose, playbookId, projectId }: { open: boolean; onClose: () => void; playbookId?: number; projectId?: number }) {
+export function RunJobDialog({ open, onClose, playbookId, projectId, extraVarsText }: { open: boolean; onClose: () => void; playbookId?: number; projectId?: number; extraVarsText?: string }) {
   const nav = useNavigate();
   const { toast } = useToast();
   const { canInProject } = useAuth();
@@ -20,20 +21,24 @@ export function RunJobDialog({ open, onClose, playbookId, projectId }: { open: b
   const [extraError, setExtraError] = useState("");
   const [selectedPlaybook, setSelectedPlaybook] = useState("");
   const playbooks = usePlaybooks(projectId);
+  const projects = useProjects();
+  const currentProject = projects.data?.find((p) => p.id === projectId);
   const launch = useLaunchJob();
   const needsPlaybookSelection = !!projectId && !playbookId;
   const ready = !needsPlaybookSelection || !!selectedPlaybook;
   const adHocAllowed = projectId ? canInProject(projectId, "project.admin") : false;
-  const valid = ready && !!form.playbook_id && !!form.inventory_id && adHocAllowed;
+  const valid = ready && !!form.playbook_id && adHocAllowed;
 
   useEffect(() => {
     if (!open) return;
     const fixed = playbookId ? String(playbookId) : "";
     setSelectedPlaybook(fixed);
-    setForm({ ...init, credential_ids: [], playbook_id: fixed });
+    const defaultInv = currentProject?.default_inventory_id ? String(currentProject.default_inventory_id) : "";
+    const initialVars = extraVarsText !== undefined ? extraVarsText : init.extra_vars;
+    setForm({ ...init, extra_vars: initialVars, credential_ids: [], playbook_id: fixed, inventory_id: defaultInv });
     setExtraError("");
     launch.reset();
-  }, [open, playbookId, projectId]);
+  }, [open, playbookId, projectId, currentProject, extraVarsText]);
 
   const close = () => {
     onClose();

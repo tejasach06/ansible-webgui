@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rbac import get_user_permissions, get_project_permissions
-from app.db.models import ProjectMembership, ProjectRole, User
+from app.db.models import ProjectMembership, ProjectRole, User, Inventory
 
 def _role_name(role) -> str:
     return role.value if hasattr(role, "value") else str(role)
@@ -53,3 +53,7 @@ async def has_inventory_write(db: AsyncSession, user: User) -> bool:
         ).limit(1)
     )
     return res.scalar_one_or_none() is not None
+
+
+def inventory_visible_to_project(inv: Inventory, project_id: int) -> bool:
+    return inv.project_id is None or inv.project_id == project_id

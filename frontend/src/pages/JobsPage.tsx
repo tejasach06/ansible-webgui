@@ -4,6 +4,7 @@ import { useCancelJob, useJob, useJobs, useLaunchJob } from "../api/jobs";
 import { usePlaybooks } from "../api/playbooks";
 import { useTemplates } from "../api/templates";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/PageHeader";
 import { DataTable } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -14,13 +15,14 @@ import { Select } from "../components/Field";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
+import { linkClass } from "../lib/cn";
 import type { JobListItem, JobMode, JobStatus } from "../lib/types";
 import { TERMINAL_JOB_STATUSES } from "../lib/types";
 
 const statuses: JobStatus[] = ["pending_approval", "approved", "rejected", "queued", "running", "successful", "failed", "canceled", "timed_out"];
 
 export function JobsPage() {
-  const { can, canInProject } = useAuth();
+  const { canAny, canInProject } = useAuth();
   const { toast } = useToast();
   const nav = useNavigate();
   const limit = 50;
@@ -109,14 +111,15 @@ export function JobsPage() {
   const selectedTemplate = templates.data?.find((x) => String(x.id) === form.template_id);
   const selectedPlaybook = playbooks.data?.find((p) => String(p.id) === form.playbook_id);
   const adHocAllowed = !!selectedTemplate || !selectedPlaybook || canInProject(selectedPlaybook.project_id, "project.admin");
-  const valid = form.playbook_id && form.inventory_id && adHocAllowed && surveyComplete(form, selectedTemplate?.survey_spec);
+  const valid = !!form.playbook_id && adHocAllowed && surveyComplete(form, selectedTemplate?.survey_spec);
 
   return (
     <section className="grid gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Jobs</h1>
-        {can("job.request") && <Button onClick={() => setOpen(true)}>Launch job</Button>}
-      </div>
+      <PageHeader
+        title="Jobs"
+        subtitle="Every run, filtered by status."
+        actions={canAny("job.request") && <Button onClick={() => setOpen(true)}>Launch job</Button>}
+      />
       <Select
         id="status"
         label="Status filter"
@@ -139,7 +142,7 @@ export function JobsPage() {
         loading={jobs.isLoading}
         empty="No jobs"
         columns={[
-          { key: "id", header: "ID", render: (r) => <Link className="underline" to={`/jobs/${r.id}`}>#{r.id}</Link> },
+          { key: "id", header: "ID", render: (r) => <Link className={linkClass} to={`/jobs/${r.id}`}>#{r.id}</Link> },
           { key: "status", header: "Status", render: (r) => <StatusPill status={r.status} /> },
           { key: "mode", header: "Mode", render: (r) => r.mode },
           { key: "created", header: "Created", render: (r) => r.created_at },
@@ -151,7 +154,7 @@ export function JobsPage() {
                 <Button size="sm" variant="secondary" onClick={() => nav(`/jobs/${r.id}`)}>
                   Open
                 </Button>
-                {can("job.cancel") && !TERMINAL_JOB_STATUSES.includes(r.status) && (
+                {canAny("job.cancel") && !TERMINAL_JOB_STATUSES.includes(r.status) && (
                   <Button size="sm" variant="danger" onClick={() => setCancelTarget(r)}>
                     Cancel
                   </Button>

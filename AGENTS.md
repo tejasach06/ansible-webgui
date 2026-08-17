@@ -155,8 +155,10 @@ Warning: `.env` is present in the working tree and `Settings` ships real-looking
 
 ## Tooling policy
 
-- Structural/relationship questions ("what calls X", "where is Y wired") use `xd://graphify_query` with `{"question":"...","mode":"bfs"}` before grep; grep is only for narrow literal string checks.
-- After merging changes that add/remove modules or endpoints, run `xd://graphify_update`. If `graphify-out/manifest.json` remains empty or update fails on the empty manifest, run `xd://graphify_build` on the repo root.
+- Use `xd://graphify_explain` with a single symbol name, or `xd://graphify_path` between two symbols, for relationship answers; `graphify_query` returns a flat node list and truncates at ~2000 tokens, so use it only to locate candidate files, then `read` them.
+- Pass `context_filter=["call"]` and raise the budget when a query truncates.
+- Graph regeneration is key-free (mounted `graphify_build` requires `DEEPSEEK_API_KEY` and fails): `graphify extract . --code-only && graphify cluster-only . --no-label`, run from the repo root; then `xd://graphify_update` after edits.
+- Note that `graphify-out/` is gitignored, so a fresh checkout must run the extract command above before any graphify tool will answer.
 - Any command whose output can exceed ~50 lines (`pytest`, `podman compose logs`, `npm run build`, `pip-audit`, `npm audit`, job stdout) uses `xd://mcp__context_mode_ctx_execute` or `xd://mcp__context_mode_ctx_batch_execute` instead of raw bash.
 - Re-query large indexed docs and captured command output with `xd://mcp__context_mode_ctx_search` before re-reading raw files.
 - Exact device paths: `xd://graphify_query`, `xd://graphify_update`, `xd://graphify_build`, `xd://mcp__context_mode_ctx_execute`, `xd://mcp__context_mode_ctx_batch_execute`, `xd://mcp__context_mode_ctx_execute_file`, `xd://mcp__context_mode_ctx_search`, `xd://mcp__context_mode_ctx_doctor`.
