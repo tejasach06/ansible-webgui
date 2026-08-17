@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_, select, func
 from app.db.session import get_db
 from app.db.models import Commit, Inventory, InventoryFormat, JobTemplate, User
-from app.api.auth import require
+from app.api.auth import get_current_user
 from app.services.content import ensure_inventory_repo, get_inventory_repo_path, validate_safe_path
+from app.services.rbac_scope import has_inventory_write
+from app.services.audit import audit
 
 router = APIRouter(prefix="/api/inventories", tags=["inventories"])
 INVENTORY_DIR = "inventories"
@@ -46,10 +48,15 @@ def _inventory_rel_path(filename: str) -> str:
     return f"{INVENTORY_DIR}/{fn}"
 
 
+async def _ensure_inventory_write(db: AsyncSession, user: User) -> None:
+    if not await has_inventory_write(db, user):
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Insufficient project permission"})
+
+
 @router.get("")
 async def list_inventories(
     request: Request,
-    user: User = Depends(require("read")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     if "project_id" in request.query_params:
@@ -60,9 +67,10 @@ async def list_inventories(
 @router.post("")
 async def register_inventory(
     req: InventoryRegister,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_inventory_write(db, user)
 
     rel_path = _inventory_rel_path(req.filename)
     if rel_path.endswith((".py", ".sh")):
@@ -100,12 +108,13 @@ async def register_inventory(
     db.add(inv)
     await db.commit()
     await db.refresh(inv)
+    await audit(db, "inventory_registered", actor_user_id=user.id, object_type="inventory", object_id=inv.id, detail={"path": inv.rel_path})
     return _inventory_response(inv)
 
 @router.get("/{inventory_id}/file")
 async def get_inventory_file(
     inventory_id: int,
-    user: User = Depends(require("read")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     inv = await _load_inventory(db, inventory_id)
@@ -122,9 +131,10 @@ async def get_inventory_file(
 async def save_inventory_file(
     inventory_id: int,
     req: InventoryFileSave,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_inventory_write(db, user)
     inv = await _load_inventory(db, inventory_id)
     repo_path = get_inventory_repo_path()
     try:
@@ -148,15 +158,17 @@ async def save_inventory_file(
     commit = repo.index.commit(message, author=actor, committer=actor)
     db.add(Commit(project_id=(await ensure_inventory_repo(db)).id, sha=commit.hexsha, author_user_id=user.id, message=message, files_changed=[inv.rel_path]))
     await db.commit()
+    await audit(db, "inventory_file_saved", actor_user_id=user.id, object_type="inventory", object_id=inv.id, detail={"sha": commit.hexsha})
     return {"status": "ok", "sha": commit.hexsha}
 
 @router.patch("/{inventory_id}")
 async def update_inventory(
     inventory_id: int,
     req: InventoryUpdate,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_inventory_write(db, user)
     inv = await _load_inventory(db, inventory_id)
     if req.name is not None and req.name != inv.name:
         duplicate = (await db.execute(select(Inventory).where(Inventory.name == req.name, Inventory.id != inventory_id))).scalar_one_or_none()
@@ -167,18 +179,21 @@ async def update_inventory(
         inv.format = req.format
     await db.commit()
     await db.refresh(inv)
+    await audit(db, "inventory_updated", actor_user_id=user.id, object_type="inventory", object_id=inv.id)
     return _inventory_response(inv)
 
 @router.delete("/{inventory_id}")
 async def delete_inventory_row(
     inventory_id: int,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_inventory_write(db, user)
     inv = await _load_inventory(db, inventory_id)
     refs = (await db.execute(select(func.count(JobTemplate.id)).where(JobTemplate.inventory_id == inventory_id))).scalar_one()
     if refs:
         raise HTTPException(status_code=409, detail={"code": "inventory_in_use", "message": "Inventory is used by job templates"})
     await db.delete(inv)
     await db.commit()
+    await audit(db, "inventory_deleted", actor_user_id=user.id, object_type="inventory", object_id=inventory_id)
     return {"status": "ok"}

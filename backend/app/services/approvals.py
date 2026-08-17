@@ -20,9 +20,11 @@ def freeze_params_snapshot(
     credential_ids: list = None,
     job_timeout: int = 3600,
     git_sha: str = None,
-    inventory_git_sha: str = None
+    inventory_git_sha: str = None,
+    overrides: dict = None
 ) -> dict:
     return {
+        "overrides": overrides or {},
         "git_sha": git_sha,
         "inventory_git_sha": inventory_git_sha,
         "playbook_rel_path": playbook_rel_path,

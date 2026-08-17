@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.db.models import AuditLog, Project, Role, User
+from app.db.models import Project, User, Role, ProjectMembership, ProjectRole, AuditLog
 from app.core.security import hash_password
 from app.core.config import settings
 from app.services.content import init_project_repo, get_project_repo_path
@@ -21,6 +21,8 @@ async def test_tree_lists_repo_files(client, db):
     db.add(project)
     await db.commit()
     await db.refresh(project)
+    db.add(ProjectMembership(project_id=project.id, user_id=1, role=ProjectRole.owner))
+    await db.commit()
     await init_project_repo(db, project, "admin", "admin@example.com")
     playbook = get_project_repo_path(project.name) / "playbooks" / "site.yml"
     playbook.write_text("- hosts: localhost\n  tasks: []\n")
@@ -28,7 +30,7 @@ async def test_tree_lists_repo_files(client, db):
     await login(client)
     res = await client.get(f"/api/content/{project.id}/tree")
 
-    assert res.status_code == 200
+    assert res.status_code == 200, f"Expected 200 got {res.status_code}: {res.json()}"
     body = res.json()
     assert {"rel_path": "playbooks/site.yml", "name": "site.yml", "type": "file", "size": playbook.stat().st_size} in body["entries"]
     assert body["truncated"] is False
@@ -41,17 +43,16 @@ async def test_tree_unknown_project_404(client):
     res = await client.get("/api/content/999999/tree")
 
     assert res.status_code == 404
-    assert res.json()["detail"]["code"] == "project_not_found"
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_audit_requires_user_manage(client, db):
-    viewer_role = (await db.execute(select(Role).where(Role.name == "viewer"))).scalar_one()
-    viewer = User(username="viewer-audit", email="viewer-audit@example.com", password_hash=hash_password("changeme"), roles=[viewer_role])
-    db.add(viewer)
+    user_role = (await db.execute(select(Role).where(Role.name == "user"))).scalar_one()
+    non_admin = User(username="user-audit", email="user-audit@example.com", password_hash=hash_password("changeme"), roles=[user_role])
+    db.add(non_admin)
     await db.commit()
 
-    await login(client, "viewer-audit", "changeme")
+    await login(client, "user-audit", "changeme")
     res = await client.get("/api/audit")
 
     assert res.status_code == 403

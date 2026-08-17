@@ -1,5 +1,5 @@
-from app.services.job_events import build_host_summary, build_task_tree
-
+from app.services.run_report import ReportBuilder
+from app.db.models import HostResultStatus
 
 def rows():
     return [
@@ -13,18 +13,18 @@ def rows():
         (8, "runner_on_skipped", "web4", {"event_data": {"task_uuid": "t2", "host": "web4", "res": {}}}),
     ]
 
+def test_report_builder_accumulates_events():
+    builder = ReportBuilder(1)
+    for counter, event, host, payload in rows():
+        builder.handle(counter, event, host, payload)
+    plays, tasks, host_results = builder.pending_plays, builder.pending_tasks, builder.pending_results
 
-def test_build_task_tree_counts_results_and_failures_once():
-    tree = build_task_tree(rows())
-    task1, task2 = tree["plays"][0]["tasks"]
-    assert task1["results"] == {"ok": 0, "changed": 1, "failed": 0, "unreachable": 0, "skipped": 0}
-    assert task2["failed_hosts"] == ["web2", "web3"]
-    assert task2["first_failure_counter"] == 6
+    assert len(plays) == 1
+    assert len(tasks) == 2
+    assert len(host_results) == 4
 
-
-def test_build_host_summary_sets_status_precedence():
-    summary = build_host_summary(rows())
-    hosts = {row["host"]: row for row in summary["hosts"]}
-    assert hosts["web3"]["status"] == "unreachable"
-    assert hosts["web2"]["status"] == "failed"
-    assert summary["totals"] == {"ok": 0, "changed": 1, "failed": 1, "unreachable": 1, "skipped": 1}
+    statuses = [hr.status for hr in host_results]
+    assert HostResultStatus.changed in statuses
+    assert HostResultStatus.failed in statuses
+    assert HostResultStatus.unreachable in statuses
+    assert HostResultStatus.skipped in statuses

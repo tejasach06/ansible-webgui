@@ -34,16 +34,17 @@ async def _inventory(db, name: str = "resource-inv"):
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_patch_credential_username_and_list_hides_payload(client):
+async def test_patch_credential_username_and_list_hides_payload(client, db):
     await login(client)
-    created = await client.post("/api/credentials", json={"name": "machine", "kind": "ssh_password", "payload": "secret"}, headers=MUTATE)
+    project, _ = await _project_with_playbooks(db, "cred-proj-1")
+    created = await client.post("/api/credentials", json={"project_id": project.id, "name": "machine", "kind": "ssh_password", "payload": "secret"}, headers=MUTATE)
     assert created.status_code == 200
 
     res = await client.patch(f"/api/credentials/{created.json()['id']}", json={"username": "deploy"}, headers=MUTATE)
 
     assert res.status_code == 200
     assert res.json()["username"] == "deploy"
-    listed = await client.get("/api/credentials")
+    listed = await client.get(f"/api/credentials?project_id={project.id}")
     assert listed.status_code == 200
     assert all("payload" not in item for item in listed.json())
 
@@ -51,7 +52,8 @@ async def test_patch_credential_username_and_list_hides_payload(client):
 @pytest.mark.asyncio(loop_scope="session")
 async def test_patch_credential_rotates_secret_and_name_keeps_secret(client, db):
     await login(client)
-    created = await client.post("/api/credentials", json={"name": "rotate", "kind": "ssh_key", "payload": "old"}, headers=MUTATE)
+    project, _ = await _project_with_playbooks(db, "cred-proj-2")
+    created = await client.post("/api/credentials", json={"project_id": project.id, "name": "rotate", "kind": "ssh_key", "payload": "old"}, headers=MUTATE)
     cred_id = created.json()["id"]
 
     rotated = await client.patch(f"/api/credentials/{cred_id}", json={"payload": "newsecret"}, headers=MUTATE)
@@ -69,7 +71,7 @@ async def test_delete_credential_referenced_by_template_returns_conflict(client,
     project, _ = await _project_with_playbooks(db, "cred-template-project")
     playbook = Playbook(project_id=project.id, rel_path="playbooks/site.yml", name="site")
     inv = await _inventory(db, "cred-template-inv")
-    cred = Credential(name="templated-cred", kind=CredentialKind.ssh_password, username="deploy", payload_enc=b"x", created_by=1)
+    cred = Credential(project_id=project.id, name="templated-cred", kind=CredentialKind.ssh_password, username="deploy", payload_enc=b"x", created_by=1)
     db.add_all([playbook, cred])
     await db.commit()
     await db.refresh(playbook)
@@ -90,8 +92,8 @@ async def test_request_job_rejects_multiple_credential_usernames(client, db):
     project, _ = await _project_with_playbooks(db, "job-user-conflict-project")
     playbook = Playbook(project_id=project.id, rel_path="playbooks/site.yml", name="site")
     inv = await _inventory(db, "job-user-conflict-inv")
-    c1 = Credential(name="user-one", kind=CredentialKind.ssh_password, username="one", payload_enc=b"x", created_by=1)
-    c2 = Credential(name="user-two", kind=CredentialKind.ssh_key, username="two", payload_enc=b"y", created_by=1)
+    c1 = Credential(project_id=project.id, name="user-one", kind=CredentialKind.ssh_password, username="one", payload_enc=b"x", created_by=1)
+    c2 = Credential(project_id=project.id, name="user-two", kind=CredentialKind.ssh_key, username="two", payload_enc=b"y", created_by=1)
     db.add_all([playbook, c1, c2])
     await db.commit()
     await db.refresh(playbook)
@@ -110,8 +112,8 @@ async def test_request_job_allows_password_and_become_credentials_for_same_usern
     project, _ = await _project_with_playbooks(db, "job-user-shared-project")
     playbook = Playbook(project_id=project.id, rel_path="playbooks/site.yml", name="site")
     inv = await _inventory(db, "job-user-shared-inv")
-    c1 = Credential(name="shared-ssh", kind=CredentialKind.ssh_password, username="tejas", payload_enc=b"x", created_by=1)
-    c2 = Credential(name="shared-become", kind=CredentialKind.become_password, username="tejas", payload_enc=b"y", created_by=1)
+    c1 = Credential(project_id=project.id, name="shared-ssh", kind=CredentialKind.ssh_password, username="tejas", payload_enc=b"x", created_by=1)
+    c2 = Credential(project_id=project.id, name="shared-become", kind=CredentialKind.become_password, username="tejas", payload_enc=b"y", created_by=1)
     db.add_all([playbook, c1, c2])
     await db.commit()
     await db.refresh(playbook)
