@@ -131,14 +131,14 @@ def status(action, kind, name):
     print(f"{action}: {kind} {name}")
 
 
-def ensure_credential(api, name, kind, username, payload):
-    existing = by_name(api.call("GET", "/api/credentials"), name)
+def ensure_credential(api, project_id, name, kind, username, payload):
+    existing = by_name(api.call("GET", f"/api/credentials?project_id={project_id}"), name)
     if existing:
         # ponytail: backend PATCH cannot accept JSON null for username; empty string normalizes to None.
         api.call("PATCH", f"/api/credentials/{existing['id']}", {"username": username if username is not None else "", "payload": payload})
         status("reused (updated)", "credential", name)
         return existing
-    created = api.call("POST", "/api/credentials", {"name": name, "kind": kind, "username": username, "payload": payload})
+    created = api.call("POST", "/api/credentials", {"project_id": project_id, "name": name, "kind": kind, "username": username, "payload": payload})
     status("created", "credential", name)
     return created
 
@@ -187,8 +187,6 @@ def main():
     api = Api(args.base_url)
     api.call("POST", "/api/auth/login", {"username": args.username, "password": args.password})
 
-    ssh = ensure_credential(api, "demo-tejas-ssh", "ssh_password", args.ssh_user, args.ssh_password)
-    become = ensure_credential(api, "demo-tejas-become", "become_password", None, args.ssh_password)
 
     inventory_content = f"""[podman_hosts]
 {args.target_host}
@@ -205,14 +203,20 @@ ansible_ssh_common_args=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/n
     install_project = ensure_created(api, "/api/projects", "podman-install-demo", {"name": "podman-install-demo"}, "project")
     revert_project = ensure_created(api, "/api/projects", "podman-revert-demo", {"name": "podman-revert-demo"}, "project")
 
+    ssh_install = ensure_credential(api, install_project["id"], "demo-tejas-ssh", "ssh_password", args.ssh_user, args.ssh_password)
+    become_install = ensure_credential(api, install_project["id"], "demo-tejas-become", "become_password", None, args.ssh_password)
+
+    ssh_revert = ensure_credential(api, revert_project["id"], "demo-tejas-ssh", "ssh_password", args.ssh_user, args.ssh_password)
+    become_revert = ensure_credential(api, revert_project["id"], "demo-tejas-become", "become_password", None, args.ssh_password)
+
     install_playbook = ensure_created(api, "/api/playbooks", "install-podman", {"project_id": install_project["id"], "rel_path": "playbooks/install_podman.yml", "name": "install-podman", "content": INSTALL_PLAYBOOK, "message": "Seed install-podman"}, "playbook", "?" + urllib.parse.urlencode({"project_id": install_project["id"]}))
     revert_playbook = ensure_created(api, "/api/playbooks", "revert-podman", {"project_id": revert_project["id"], "rel_path": "playbooks/revert_podman.yml", "name": "revert-podman", "content": REVERT_PLAYBOOK, "message": "Seed revert-podman"}, "playbook", "?" + urllib.parse.urlencode({"project_id": revert_project["id"]}))
 
-    common = {"inventory_id": inventory["id"], "extra_vars": {}, "verbosity": 0, "forks": 5, "credential_ids": [ssh["id"], become["id"]], "requires_approval": False, "diff_mode": False, "survey_spec": []}
+    common = {"inventory_id": inventory["id"], "extra_vars": {}, "verbosity": 0, "forks": 5, "requires_approval": False, "diff_mode": False, "survey_spec": [], "ask_limit": True, "ask_extra_vars": True}
     install_template_name = f"Install Podman on {args.target_host}"
     revert_template_name = f"Revert Podman on {args.target_host}"
-    ensure_template(api, install_project["id"], install_template_name, {**common, "project_id": install_project["id"], "name": install_template_name, "playbook_id": install_playbook["id"]})
-    ensure_template(api, revert_project["id"], revert_template_name, {**common, "project_id": revert_project["id"], "name": revert_template_name, "playbook_id": revert_playbook["id"]})
+    ensure_template(api, install_project["id"], install_template_name, {**common, "credential_ids": [ssh_install["id"], become_install["id"]], "project_id": install_project["id"], "name": install_template_name, "playbook_id": install_playbook["id"]})
+    ensure_template(api, revert_project["id"], revert_template_name, {**common, "credential_ids": [ssh_revert["id"], become_revert["id"]], "project_id": revert_project["id"], "name": revert_template_name, "playbook_id": revert_playbook["id"]})
 
     print(f"Template: {install_template_name}")
     print(f"Template: {revert_template_name}")

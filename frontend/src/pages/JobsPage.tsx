@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useCancelJob, useJob, useJobs, useLaunchJob } from "../api/jobs";
+import { usePlaybooks } from "../api/playbooks";
 import { useTemplates } from "../api/templates";
 import { Button } from "../components/Button";
 import { DataTable } from "../components/DataTable";
@@ -19,7 +20,7 @@ import { TERMINAL_JOB_STATUSES } from "../lib/types";
 const statuses: JobStatus[] = ["pending_approval", "approved", "rejected", "queued", "running", "successful", "failed", "canceled", "timed_out"];
 
 export function JobsPage() {
-  const { can } = useAuth();
+  const { can, canInProject } = useAuth();
   const { toast } = useToast();
   const nav = useNavigate();
   const limit = 50;
@@ -33,6 +34,7 @@ export function JobsPage() {
   const first = useRef<HTMLSelectElement>(null);
   const jobs = useJobs(limit, offset, status || undefined);
   const templates = useTemplates();
+  const playbooks = usePlaybooks();
   const launch = useLaunchJob();
   const cancelJob = useCancelJob();
   const relaunch = useJob(relaunchId ?? 0, !!relaunchId);
@@ -72,7 +74,22 @@ export function JobsPage() {
 
   const pickTemplate = (id: string) => {
     const t = templates.data?.find((x) => String(x.id) === id);
-    setForm({ ...form, template_id: id, playbook_id: t ? String(t.playbook_id) : form.playbook_id, inventory_id: t ? String(t.inventory_id) : form.inventory_id, credential_ids: t ? t.credential_ids : form.credential_ids, diff: t?.diff_mode ?? form.diff, survey_answers: {} });
+    setForm({
+      ...form,
+      template_id: id,
+      playbook_id: t ? String(t.playbook_id) : form.playbook_id,
+      inventory_id: t ? String(t.inventory_id) : form.inventory_id,
+      mode: t ? "live" : form.mode,
+      limit: t?.limit_pattern ?? "",
+      tags: t?.tags ?? "",
+      skip_tags: t?.skip_tags ?? "",
+      verbosity: t?.verbosity ?? form.verbosity,
+      forks: t?.forks ?? form.forks,
+      credential_ids: t ? t.credential_ids : form.credential_ids,
+      extra_vars: JSON.stringify(t?.extra_vars ?? {}, null, 2),
+      diff: t?.diff_mode ?? form.diff,
+      survey_answers: {},
+    });
   };
 
   const submit = () => {
@@ -90,7 +107,9 @@ export function JobsPage() {
   };
 
   const selectedTemplate = templates.data?.find((x) => String(x.id) === form.template_id);
-  const valid = form.playbook_id && form.inventory_id && surveyComplete(form, selectedTemplate?.survey_spec);
+  const selectedPlaybook = playbooks.data?.find((p) => String(p.id) === form.playbook_id);
+  const adHocAllowed = !!selectedTemplate || !selectedPlaybook || canInProject(selectedPlaybook.project_id, "project.admin");
+  const valid = form.playbook_id && form.inventory_id && adHocAllowed && surveyComplete(form, selectedTemplate?.survey_spec);
 
   return (
     <section className="grid gap-4">

@@ -1,8 +1,296 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
-import { useTemplates, useCreateTemplates, useUpdateTemplates, useDeleteTemplates } from "../api/templates"; import { useProjects } from "../api/projects"; import { usePlaybooks } from "../api/playbooks"; import { useInventories } from "../api/inventories"; import { useCredentials } from "../api/credentials"; import { useAuth } from "../lib/auth"; import { useToast } from "./Toast"; import { Button } from "./Button"; import { Drawer } from "./Drawer"; import { DataTable } from "./DataTable"; import { TextArea, TextInput, Checkbox, Select, NumberInput } from "./Field"; import { ErrorBanner } from "./ErrorBanner"; import type { JobTemplate, SurveyField, SurveyFieldType } from "../lib/types";
-const blankSurvey=():SurveyField=>({var:"",label:"",type:"text",required:false,default:"",choices:[],min:null,max:null});
-const init={name:"",project_id:"",playbook_id:"",inventory_id:"",limit_pattern:"",tags:"",skip_tags:"",verbosity:0,forks:5,credential_ids:[] as number[],extra_vars:"{}",requires_approval:true,diff_mode:false,survey_spec:[] as SurveyField[]};
-function parseExtra(v:string){try{const parsed=JSON.parse(v); return parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:null}catch{return null}}
-export function TemplatesPanel({projectId}:{projectId?:number}){const {can}=useAuth(); const {toast}=useToast(); const list=useTemplates(projectId); const projects=useProjects(); const selectableProjects=projects.data?.filter(p=>!p.is_inventory_repo); const credentials=useCredentials(); const create=useCreateTemplates(); const update=useUpdateTemplates(); const del=useDeleteTemplates(); const [open,setOpen]=useState(false); const [editing,setEditing]=useState<JobTemplate>(); const [form,setForm]=useState(init); const [extraError,setExtraError]=useState(""); const first=useRef<HTMLInputElement>(null); const playbooks=usePlaybooks(Number(form.project_id)||undefined); const inventories=useInventories(); useEffect(()=>{if(editing)setForm({...init,...editing,project_id:String(editing.project_id),playbook_id:String(editing.playbook_id),inventory_id:String(editing.inventory_id),extra_vars:JSON.stringify(editing.extra_vars??{},null,2),limit_pattern:editing.limit_pattern??"",tags:editing.tags??"",skip_tags:editing.skip_tags??"",survey_spec:editing.survey_spec??[]}); else if(projectId)setForm(f=>({...f,project_id:String(projectId)}))},[editing,projectId]); const close=()=>{setOpen(false);setEditing(undefined);setForm(projectId?{...init,project_id:String(projectId)}:init);setExtraError("")}; const submit=()=>{const extra_vars=parseExtra(form.extra_vars); if(!extra_vars){setExtraError("Extra vars must be a JSON object, for example {}");return} const survey_spec=form.survey_spec.filter(f=>f.var.trim()).map(f=>({...f,label:f.label||f.var,choices:f.type==="choice"?f.choices:[],min:f.type==="integer"?f.min:null,max:f.type==="integer"?f.max:null})); const body={project_id:Number(form.project_id),name:form.name,playbook_id:Number(form.playbook_id),inventory_id:Number(form.inventory_id),limit_pattern:form.limit_pattern||null,tags:form.tags||null,skip_tags:form.skip_tags||null,extra_vars,verbosity:Number(form.verbosity),forks:Number(form.forks),credential_ids:form.credential_ids,requires_approval:form.requires_approval,diff_mode:form.diff_mode,survey_spec}; const opts={onSuccess:()=>{close();toast(editing?"Template updated":"Template created")}}; editing?update.mutate({id:editing.id,body},opts):create.mutate(body,opts)}; const valid=form.name.trim()&&form.project_id&&form.playbook_id&&form.inventory_id; return <section className="grid gap-4"><div className="flex items-center justify-between"><h1 className="text-xl font-semibold">Job templates</h1>{can("schedule.write")&&<Button onClick={()=>setOpen(true)} icon={<Plus size={16}/>}>Create template</Button>}</div>{(list.error||create.error||update.error||del.error)&&<ErrorBanner error={list.error||create.error||update.error||del.error}/>}<DataTable<JobTemplate> rows={list.data??[]} loading={list.isLoading} empty="No job templates" columns={[{key:"name",header:"Name",render:r=>r.name},...(!projectId?[{key:"project",header:"Project",render:(r:JobTemplate)=>r.project_id}]:[]),{key:"verbosity",header:"Verbosity",render:r=>r.verbosity},{key:"forks",header:"Forks",render:r=>r.forks},{key:"diff",header:"Diff",render:r=>r.diff_mode?"On":"Off"},{key:"survey",header:"Survey",render:r=>(r.survey_spec?.length??0)},{key:"approval",header:"Approval",render:r=>r.requires_approval?"Required":"Not required"},{key:"actions",header:"Actions",render:r=>can("schedule.write")&&<div className="flex gap-2"><Button size="sm" variant="secondary" onClick={()=>{setEditing(r);setOpen(true)}}>Edit</Button><Button size="sm" variant="danger" onClick={()=>del.mutate(r.id)}>Delete</Button></div>}]}/><Drawer open={open} onClose={close} title={editing?"Edit template":"Create template"} initialFocusRef={first} footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={close}>Cancel</Button><Button disabled={!valid} loading={create.isPending||update.isPending} onClick={submit}>{editing?"Save":"Create"}</Button></div>}><div className="grid gap-3"><TextInput ref={first} id="tmpl-name" label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>{!projectId&&<Select id="tmpl-project" label="Project" value={form.project_id} onChange={e=>setForm({...form,project_id:e.target.value,playbook_id:""})}><option value="">Select project</option>{selectableProjects?.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</Select>}<Select id="tmpl-playbook" label="Playbook" value={form.playbook_id} onChange={e=>setForm({...form,playbook_id:e.target.value})}><option value="">Select playbook</option>{playbooks.data?.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</Select><Select id="tmpl-inventory" label="Inventory" value={form.inventory_id} onChange={e=>setForm({...form,inventory_id:e.target.value})}><option value="">Select inventory</option>{inventories.data?.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</Select><TextInput id="tmpl-limit" label="Limit pattern" value={form.limit_pattern} onChange={e=>setForm({...form,limit_pattern:e.target.value})}/><TextInput id="tmpl-tags" label="Tags" value={form.tags} onChange={e=>setForm({...form,tags:e.target.value})}/><TextInput id="tmpl-skip" label="Skip tags" value={form.skip_tags} onChange={e=>setForm({...form,skip_tags:e.target.value})}/><NumberInput id="tmpl-verbosity" label="Verbosity" min={0} max={4} value={form.verbosity} onChange={e=>setForm({...form,verbosity:Number(e.target.value)})}/><NumberInput id="tmpl-forks" label="Forks" value={form.forks} onChange={e=>setForm({...form,forks:Number(e.target.value)})}/><Checkbox id="tmpl-diff" label="Diff" checked={form.diff_mode} onChange={e=>setForm({...form,diff_mode:e.target.checked})}/><div className="grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"><div className="flex items-center justify-between"><div><div className="text-sm font-medium">Survey</div><p className="text-xs text-zinc-500 dark:text-zinc-400">Prompt operators at launch.</p></div><Button size="sm" variant="secondary" onClick={()=>setForm({...form,survey_spec:[...form.survey_spec,blankSurvey()]})}>Add field</Button></div>{form.survey_spec.map((f,i)=><div key={i} className="grid gap-2 rounded border border-zinc-200 p-2 dark:border-zinc-800"><div className="grid gap-2 md:grid-cols-3"><TextInput id={`survey-var-${i}`} label="Var" value={f.var} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,var:e.target.value}:x)})}/><TextInput id={`survey-label-${i}`} label="Label" value={f.label} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,label:e.target.value}:x)})}/><Select id={`survey-type-${i}`} label="Type" value={f.type} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,type:e.target.value as SurveyFieldType}:x)})}><option value="text">text</option><option value="textarea">textarea</option><option value="password">password</option><option value="integer">integer</option><option value="boolean">boolean</option><option value="choice">choice</option></Select></div><Checkbox id={`survey-required-${i}`} label="Required" checked={f.required} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,required:e.target.checked}:x)})}/><TextInput id={`survey-default-${i}`} label="Default" value={String(f.default??"")} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,default:e.target.value}:x)})}/>{f.type==="choice"&&<TextInput id={`survey-choices-${i}`} label="Choices" value={f.choices.join(",")} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,choices:e.target.value.split(",").map(s=>s.trim()).filter(Boolean)}:x)})}/>} {f.type==="integer"&&<div className="grid gap-2 md:grid-cols-2"><NumberInput id={`survey-min-${i}`} label="Min" value={f.min??""} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,min:e.target.value===""?null:Number(e.target.value)}:x)})}/><NumberInput id={`survey-max-${i}`} label="Max" value={f.max??""} onChange={e=>setForm({...form,survey_spec:form.survey_spec.map((x,n)=>n===i?{...x,max:e.target.value===""?null:Number(e.target.value)}:x)})}/></div>}<Button size="sm" variant="danger" onClick={()=>setForm({...form,survey_spec:form.survey_spec.filter((_,n)=>n!==i)})}>Remove</Button></div>)}</div><div className="grid gap-1"><span className="text-sm font-medium">Credentials</span>{credentials.data?.map(c=><Checkbox key={c.id} id={`tmpl-cred-${c.id}`} label={c.name} checked={form.credential_ids.includes(c.id)} onChange={e=>setForm({...form,credential_ids:e.target.checked?[...form.credential_ids,c.id]:form.credential_ids.filter(id=>id!==c.id)})}/>)}</div><TextArea id="tmpl-extra" label="Extra vars" value={form.extra_vars} error={extraError} onChange={e=>{setExtraError("");setForm({...form,extra_vars:e.target.value})}}/><Checkbox id="tmpl-approval" label="Requires approval" checked={form.requires_approval} disabled={!can("user.manage")} onChange={e=>setForm({...form,requires_approval:e.target.checked})}/></div></Drawer></section>}
+import { useTemplates, useCreateTemplates, useUpdateTemplates, useDeleteTemplates } from "../api/templates";
+import { useProjects } from "../api/projects";
+import { usePlaybooks } from "../api/playbooks";
+import { useInventories } from "../api/inventories";
+import { useCredentials } from "../api/credentials";
+import { useToast } from "./Toast";
+import { Button } from "./Button";
+import { Drawer } from "./Drawer";
+import { DataTable } from "./DataTable";
+import { TextArea, TextInput, Checkbox, Select, NumberInput } from "./Field";
+import { ErrorBanner } from "./ErrorBanner";
+import type { JobTemplate, SurveyField } from "../lib/types";
 
+const init = {
+  name: "",
+  description: "",
+  project_id: "",
+  playbook_id: "",
+  inventory_id: "",
+  limit_pattern: "",
+  tags: "",
+  skip_tags: "",
+  verbosity: 0,
+  forks: 5,
+  credential_ids: [] as number[],
+  extra_vars: "{}",
+  requires_approval: true,
+  diff_mode: false,
+  survey_spec: [] as SurveyField[],
+  ask_limit: false,
+  ask_tags: false,
+  ask_skip_tags: false,
+  ask_extra_vars: false,
+  ask_verbosity: false,
+  ask_diff: false,
+  ask_credentials: false,
+  ask_inventory: false,
+  ask_mode: false,
+};
+
+function parseExtra(v: string) {
+  try {
+    const parsed = JSON.parse(v);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function TemplatesPanel({ projectId }: { projectId?: number }) {
+  const { toast } = useToast();
+  const list = useTemplates(projectId);
+  const projects = useProjects();
+  const selectableProjects = projects.data?.filter((p) => !p.is_inventory_repo);
+
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<JobTemplate>();
+  const [form, setForm] = useState(init);
+  const [extraError, setExtraError] = useState("");
+  const first = useRef<HTMLInputElement>(null);
+
+  const effectiveProjectId = Number(form.project_id) || projectId || 0;
+  const playbooks = usePlaybooks(effectiveProjectId || undefined);
+  const inventories = useInventories();
+  const credentials = useCredentials(effectiveProjectId || undefined);
+
+  const create = useCreateTemplates();
+  const update = useUpdateTemplates();
+  const del = useDeleteTemplates();
+
+  useEffect(() => {
+    if (editing) {
+      setForm({
+        ...init,
+        ...editing,
+        description: editing.description ?? "",
+        limit_pattern: editing.limit_pattern ?? "",
+        tags: editing.tags ?? "",
+        skip_tags: editing.skip_tags ?? "",
+        project_id: String(editing.project_id),
+        playbook_id: String(editing.playbook_id),
+        inventory_id: String(editing.inventory_id),
+        extra_vars: JSON.stringify(editing.extra_vars || {}, null, 2),
+        ask_limit: editing.ask_limit ?? false,
+        ask_tags: editing.ask_tags ?? false,
+        ask_skip_tags: editing.ask_skip_tags ?? false,
+        ask_extra_vars: editing.ask_extra_vars ?? false,
+        ask_verbosity: editing.ask_verbosity ?? false,
+        ask_diff: editing.ask_diff ?? false,
+        ask_credentials: editing.ask_credentials ?? false,
+        ask_inventory: editing.ask_inventory ?? false,
+        ask_mode: editing.ask_mode ?? false,
+      });
+    } else {
+      setForm({ ...init, project_id: projectId ? String(projectId) : "" });
+    }
+  }, [editing, projectId]);
+
+  const close = () => {
+    setOpen(false);
+    setEditing(undefined);
+    setForm(init);
+    setExtraError("");
+  };
+
+  const submit = () => {
+    const parsed = parseExtra(form.extra_vars);
+    if (!parsed) {
+      setExtraError("Invalid JSON dictionary");
+      return;
+    }
+    const payload = {
+      name: form.name,
+      description: form.description || null,
+      project_id: Number(form.project_id),
+      playbook_id: Number(form.playbook_id),
+      inventory_id: Number(form.inventory_id),
+      limit_pattern: form.limit_pattern || null,
+      tags: form.tags || null,
+      skip_tags: form.skip_tags || null,
+      verbosity: form.verbosity,
+      forks: form.forks,
+      credential_ids: form.credential_ids,
+      extra_vars: parsed,
+      requires_approval: form.requires_approval,
+      diff_mode: form.diff_mode,
+      survey_spec: form.survey_spec,
+      ask_limit: form.ask_limit,
+      ask_tags: form.ask_tags,
+      ask_skip_tags: form.ask_skip_tags,
+      ask_extra_vars: form.ask_extra_vars,
+      ask_verbosity: form.ask_verbosity,
+      ask_diff: form.ask_diff,
+      ask_credentials: form.ask_credentials,
+      ask_inventory: form.ask_inventory,
+      ask_mode: form.ask_mode,
+    };
+
+    if (editing) {
+      update.mutate(
+        { id: editing.id, body: payload },
+        {
+          onSuccess: () => {
+            close();
+            toast("Template updated");
+          },
+        }
+      );
+    } else {
+      create.mutate(payload, {
+        onSuccess: () => {
+          close();
+          toast("Template created");
+        },
+      });
+    }
+  };
+
+  return (
+    <section className="grid gap-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Job Templates</h2>
+        <Button icon={<Plus size={16} />} onClick={() => setOpen(true)}>
+          Create template
+        </Button>
+      </div>
+
+      {(list.error || create.error || update.error || del.error) && (
+        <ErrorBanner error={list.error || create.error || update.error || del.error} />
+      )}
+
+      <DataTable<JobTemplate>
+        rows={list.data ?? []}
+        loading={list.isLoading}
+        empty={<p className="p-4 text-sm text-zinc-500">No job templates created yet.</p>}
+        columns={[
+          { key: "name", header: "Name", render: (r) => r.name },
+          { key: "desc", header: "Description", render: (r) => r.description || "—" },
+          { key: "approval", header: "Requires approval", render: (r) => (r.requires_approval ? "Yes" : "No") },
+          {
+            key: "actions",
+            header: "Actions",
+            render: (r) => (
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => { setEditing(r); setOpen(true); }}>
+                  Edit
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => del.mutate(r.id)}>
+                  Delete
+                </Button>
+              </div>
+            ),
+          },
+        ]}
+      />
+
+      <Drawer
+        open={open}
+        onClose={close}
+        title={editing ? "Edit Template" : "Create Template"}
+        initialFocusRef={first}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={close}>
+              Cancel
+            </Button>
+            <Button onClick={submit} loading={create.isPending || update.isPending}>
+              Save
+            </Button>
+          </div>
+        }
+      >
+        <div className="grid gap-4">
+          <TextInput ref={first} id="template-name" label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <TextInput id="template-description" label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+
+          {!projectId && (
+            <Select id="template-project" label="Project" value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+              <option value="">Select project</option>
+              {(selectableProjects || []).map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </Select>
+          )}
+
+          <Select id="template-playbook" label="Playbook" value={form.playbook_id} onChange={(e) => setForm({ ...form, playbook_id: e.target.value })}>
+            <option value="">Select playbook</option>
+            {(playbooks.data || []).map((pb) => (
+              <option key={pb.id} value={pb.id}>{pb.name} ({pb.rel_path})</option>
+            ))}
+          </Select>
+
+          <Select id="template-inventory" label="Inventory" value={form.inventory_id} onChange={(e) => setForm({ ...form, inventory_id: e.target.value })}>
+            <option value="">Select inventory</option>
+            {(inventories.data || []).map((inv) => (
+              <option key={inv.id} value={inv.id}>{inv.name}</option>
+            ))}
+          </Select>
+
+          <TextInput id="template-limit" label="Limit pattern" value={form.limit_pattern} onChange={(e) => setForm({ ...form, limit_pattern: e.target.value })} />
+          <TextInput id="template-tags" label="Tags" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+          <TextInput id="template-skip-tags" label="Skip tags" value={form.skip_tags} onChange={(e) => setForm({ ...form, skip_tags: e.target.value })} />
+
+          <TextArea id="template-extravars" label="Extra Vars (JSON)" value={form.extra_vars} onChange={(e) => { setForm({ ...form, extra_vars: e.target.value }); setExtraError(""); }} />
+          {extraError && <p className="text-xs text-red-500">{extraError}</p>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <NumberInput id="template-verbosity" label="Verbosity" value={form.verbosity} onChange={(e) => setForm({ ...form, verbosity: Number(e.target.value) })} />
+            <NumberInput id="template-forks" label="Forks" value={form.forks} onChange={(e) => setForm({ ...form, forks: Number(e.target.value) })} />
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-medium">Credentials</label>
+            <div className="grid gap-1">
+              {(credentials.data || []).map((c) => (
+                <Checkbox
+                  key={c.id}
+                  id={`cred-${c.id}`}
+                  label={`${c.name} (${c.kind})`}
+                  checked={form.credential_ids.includes(c.id)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...form.credential_ids, c.id]
+                      : form.credential_ids.filter((id) => id !== c.id);
+                    setForm({ ...form, credential_ids: next });
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <Checkbox id="template-approval" label="Requires approval" checked={form.requires_approval} onChange={(e) => setForm({ ...form, requires_approval: e.target.checked })} />
+          <Checkbox id="template-diff" label="Diff mode" checked={form.diff_mode} onChange={(e) => setForm({ ...form, diff_mode: e.target.checked })} />
+
+          {/* Fieldset: Prompt on Launch */}
+          <fieldset className="space-y-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+            <legend className="px-1 text-xs font-semibold">Prompt on Launch (allow requester overrides)</legend>
+            <div className="grid grid-cols-2 gap-2">
+              <Checkbox id="ask-limit" label="Limit" checked={form.ask_limit} onChange={(e) => setForm({ ...form, ask_limit: e.target.checked })} />
+              <Checkbox id="ask-tags" label="Tags" checked={form.ask_tags} onChange={(e) => setForm({ ...form, ask_tags: e.target.checked })} />
+              <Checkbox id="ask-skip-tags" label="Skip tags" checked={form.ask_skip_tags} onChange={(e) => setForm({ ...form, ask_skip_tags: e.target.checked })} />
+              <Checkbox id="ask-extra-vars" label="Extra vars" checked={form.ask_extra_vars} onChange={(e) => setForm({ ...form, ask_extra_vars: e.target.checked })} />
+              <Checkbox id="ask-verbosity" label="Verbosity" checked={form.ask_verbosity} onChange={(e) => setForm({ ...form, ask_verbosity: e.target.checked })} />
+              <Checkbox id="ask-diff" label="Diff mode" checked={form.ask_diff} onChange={(e) => setForm({ ...form, ask_diff: e.target.checked })} />
+              <Checkbox id="ask-credentials" label="Credentials" checked={form.ask_credentials} onChange={(e) => setForm({ ...form, ask_credentials: e.target.checked })} />
+              <Checkbox id="ask-inventory" label="Inventory" checked={form.ask_inventory} onChange={(e) => setForm({ ...form, ask_inventory: e.target.checked })} />
+              <Checkbox id="ask-mode" label="Execution mode" checked={form.ask_mode} onChange={(e) => setForm({ ...form, ask_mode: e.target.checked })} />
+            </div>
+          </fieldset>
+        </div>
+      </Drawer>
+    </section>
+  );
+}

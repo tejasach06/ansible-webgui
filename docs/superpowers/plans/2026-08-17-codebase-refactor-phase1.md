@@ -35,19 +35,19 @@
 **Interfaces:**
 - Produces: a written note (top of this task's commit message or a scratch file, not committed) listing: (a) what a "pipeline" is (ordered job-template sequence, stage gating, etc. — read from `run_pipeline.py`/`pipelines.py`), (b) every new permission string introduced, (c) every new endpoint path + method.
 
-- [ ] **Step 1: Read all Task 1 files listed above in full.**
+- [x] **Step 1: Read all Task 1 files listed above in full.**
 
-- [ ] **Step 2: Verify router registration** — confirm `pipelines.router` is included in `backend/app/main.py` alongside the other routers (`app.include_router(...)`). If missing, add it following the exact pattern used for the existing routers in that file.
+- [x] **Step 2: Verify router registration** — confirm `pipelines.router` is included in `backend/app/main.py` alongside the other routers (`app.include_router(...)`). If missing, add it following the exact pattern used for the existing routers in that file.
 
-- [ ] **Step 3: Verify permission registration** — for every new permission string referenced via `Depends(require("perm.name"))` in `pipelines.py` (or any modified router), confirm it exists as a key in `PERMISSIONS` in `backend/app/core/rbac.py` for the correct roles. Add any missing entries following the existing dict shape (roles: `admin, manager, developer, operator, viewer`).
+- [x] **Step 3: Verify permission registration** — for every new permission string referenced via `Depends(require("perm.name"))` in `pipelines.py` (or any modified router), confirm it exists as a key in `PERMISSIONS` in `backend/app/core/rbac.py` for the correct roles. Add any missing entries following the existing dict shape (roles: `admin, manager, developer, operator, viewer`).
 
-- [ ] **Step 4: Verify audit calls** — for every mutating endpoint (`POST`/`PUT`/`PATCH`/`DELETE`) in `pipelines.py` and any modified router files, confirm it calls `await audit(db, "<action>", ...)` per the existing pattern in `app/services/audit.py`. Add missing calls; pick action names consistent with existing ones (`job_requested`, `job_approved`, etc. — e.g. `pipeline_requested`, `pipeline_approved`).
+- [x] **Step 4: Verify audit calls** — for every mutating endpoint (`POST`/`PUT`/`PATCH`/`DELETE`) in `pipelines.py` and any modified router files, confirm it calls `await audit(db, "<action>", ...)` per the existing pattern in `app/services/audit.py`. Add missing calls; pick action names consistent with existing ones (`job_requested`, `job_approved`, etc. — e.g. `pipeline_requested`, `pipeline_approved`).
 
-- [ ] **Step 5: Verify error envelope** — grep `pipelines.py` and modified routers for any `raise HTTPException` not using `detail={"code": ..., "message": ...}`. Fix any that don't match.
+- [x] **Step 5: Verify error envelope** — grep `pipelines.py` and modified routers for any `raise HTTPException` not using `detail={"code": ..., "message": ...}`. Fix any that don't match.
 
-- [ ] **Step 6: Verify frontend `apiFetch` usage** — grep `frontend/src` for raw `fetch(` calls introduced in the new/modified files from this diff. Replace any with `apiFetch<T>()`.
+- [x] **Step 6: Verify frontend `apiFetch` usage** — grep `frontend/src` for raw `fetch(` calls introduced in the new/modified files from this diff. Replace any with `apiFetch<T>()`.
 
-- [ ] **Step 7: Commit nothing yet** — this task is investigation + wiring fixes only. Stage wiring fixes with `git add -p` selectively if trivial (e.g. missing router include), but hold the commit until Task 2's tests pass, so wiring fixes land together with the tests that prove them.
+- [x] **Step 7: Commit nothing yet** — this task is investigation + wiring fixes only. Stage wiring fixes with `git add -p` selectively if trivial (e.g. missing router include), but hold the commit until Task 2's tests pass, so wiring fixes land together with the tests that prove them.
 
 ---
 
@@ -61,24 +61,24 @@
 - Consumes: wiring fixes from Task 1.
 - Produces: all four new test files passing; any function/class signatures they exercise are now stable — later tasks (frontend wiring, Phase 2) must not change these signatures without re-running this suite.
 
-- [ ] **Step 1: Run the four new test files.**
+- [x] **Step 1: Run the four new test files.**
 
 Run: `podman compose exec api pytest -q tests/test_pipelines.py tests/test_launch_governance.py tests/test_project_rbac.py tests/test_run_report.py`
 
 Expected: some failures (files are uncommitted WIP) — record exact failure output.
 
-- [ ] **Step 2: Fix failures one at a time.** For each failure, read the failing test's assertion, read the implementation it targets, and fix the implementation (not the test, unless the test itself asserts wrong behavior against a documented invariant like `approved_by != requested_by` in `approve_job_run()` — in that case fix the test to match the real invariant). Re-run the single failing test after each fix:
+- [x] **Step 2: Fix failures one at a time.** For each failure, read the failing test's assertion, read the implementation it targets, and fix the implementation (not the test, unless the test itself asserts wrong behavior against a documented invariant like `approved_by != requested_by` in `approve_job_run()` — in that case fix the test to match the real invariant). Re-run the single failing test after each fix:
 
 Run: `podman compose exec api pytest -q tests/test_pipelines.py::<test_name> -v`
 
-- [ ] **Step 3: Run the full backend suite** to confirm no regression in existing tests from the modified files (`test_approvals.py`, `test_auth.py`, `test_rbac.py`, `test_content_api.py`, `test_job_events.py`, `test_resource_edits.py`).
+- [x] **Step 3: Run the full backend suite** to confirm no regression in existing tests from the modified files (`test_approvals.py`, `test_auth.py`, `test_rbac.py`, `test_content_api.py`, `test_job_events.py`, `test_resource_edits.py`).
 
 Run: `podman compose exec api pytest -q`
 Expected: PASS, 0 failures.
 
 (If `ansible_webgui_test` database doesn't exist: `podman compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" ansible_webgui_test'` first.)
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add backend/app/main.py backend/app/core/rbac.py backend/app/api/pipelines.py \
@@ -102,20 +102,20 @@ git commit -m "feat: add pipelines, launch governance, RBAC scope, run reports"
 - Consumes: Task 2's stable pipelines/launch/rbac_scope/run_report modules (these files were modified to integrate with them — e.g. `jobs/lifecycle.py` likely now checks pipeline-related state).
 - Produces: full existing test suite green with these files' changes included.
 
-- [ ] **Step 1: Run the four modified test files against the modified source.**
+- [x] **Step 1: Run the four modified test files against the modified source.**
 
 Run: `podman compose exec api pytest -q tests/test_content_api.py tests/test_job_events.py tests/test_rbac.py tests/test_resource_edits.py -v`
 
-- [ ] **Step 2: For each failure, diff the file against git HEAD to see exactly what changed, and confirm the change matches the intent mapped in Task 1** (e.g. `jobs/lifecycle.py` +184 lines likely adds pipeline-stage-aware job launching — confirm it doesn't break single-job launches). Fix regressions; do not revert intentional new behavior.
+- [x] **Step 2: For each failure, diff the file against git HEAD to see exactly what changed, and confirm the change matches the intent mapped in Task 1** (e.g. `jobs/lifecycle.py` +184 lines likely adds pipeline-stage-aware job launching — confirm it doesn't break single-job launches). Fix regressions; do not revert intentional new behavior.
 
 Run: `git diff HEAD -- backend/app/api/jobs/lifecycle.py`
 
-- [ ] **Step 3: Run full backend suite again to confirm everything integrates.**
+- [x] **Step 3: Run full backend suite again to confirm everything integrates.**
 
 Run: `podman compose exec api pytest -q`
 Expected: PASS, 0 failures.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add backend/app/api/auth.py backend/app/api/content/files.py backend/app/api/credentials.py \
@@ -138,7 +138,7 @@ git commit -m "feat: integrate pipeline/RBAC-scope awareness into jobs, projects
 **Interfaces:**
 - Produces: a go/no-go decision, recorded in the Task 5 commit message.
 
-- [ ] **Step 1: Search for references to the deleted migration IDs.**
+- [x] **Step 1: Search for references to the deleted migration IDs.**
 
 Run: `grep -rn "0001_initial_schema\|0002_global_inventories\|0003_credential_username\|0004_operator_pack" --include="*.py" --include="*.sh" --include="*.md" .`
 
