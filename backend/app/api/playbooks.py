@@ -1,13 +1,14 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_, select
 from app.db.session import get_db
 from app.db.models import Playbook, Project, User
-from app.api.auth import require
+from app.api.auth import get_current_user, require_csrf
 from app.services.content import commit_file, get_project_repo_path, validate_safe_path
 from app.services.audit import audit
+from app.services.rbac_scope import assert_project_perm, visible_project_ids
 from git import Repo
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
@@ -40,24 +41,32 @@ def _playbook_response(pb: Playbook):
 @router.get("")
 async def list_playbooks(
     project_id: Optional[int] = None,
-    user: User = Depends(require("read")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     query = select(Playbook)
     if project_id:
+        await assert_project_perm(db, user, project_id, "read")
         query = query.where(Playbook.project_id == project_id)
+    else:
+        vids = await visible_project_ids(db, user)
+        if vids is not None:
+            query = query.where(Playbook.project_id.in_(vids))
     playbooks = (await db.execute(query)).scalars().all()
     return [_playbook_response(pb) for pb in playbooks]
 
 @router.post("")
 async def register_playbook(
     req: PlaybookRegister,
-    user: User = Depends(require("content.write")),
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    require_csrf(request)
     project = (await db.execute(select(Project).where(Project.id == req.project_id))).scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail={"code": "project_not_found", "message": "Project not found"})
+    await assert_project_perm(db, user, req.project_id, "content.write")
 
     repo_path = get_project_repo_path(project.name)
     try:
@@ -88,10 +97,11 @@ async def register_playbook(
 @router.get("/{playbook_id}/file")
 async def get_playbook_file(
     playbook_id: int,
-    user: User = Depends(require("read")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     pb = await _load_playbook(db, playbook_id)
+    await assert_project_perm(db, user, pb.project_id, "read")
     project = (await db.execute(select(Project).where(Project.id == pb.project_id))).scalar_one()
     repo_path = get_project_repo_path(project.name)
     try:
@@ -106,10 +116,13 @@ async def get_playbook_file(
 async def save_playbook_file(
     playbook_id: int,
     req: PlaybookFileSave,
-    user: User = Depends(require("content.write")),
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    require_csrf(request)
     pb = await _load_playbook(db, playbook_id)
+    await assert_project_perm(db, user, pb.project_id, "content.write")
     project = (await db.execute(select(Project).where(Project.id == pb.project_id))).scalar_one()
     repo_path = get_project_repo_path(project.name)
     try:
@@ -119,16 +132,20 @@ async def save_playbook_file(
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
     sha = await commit_file(db, project, pb.rel_path, req.content, req.message or f"Update playbook {pb.name}", req.base_sha, user, lint=True)
+    await audit(db, "playbook_file_saved", actor_user_id=user.id, object_type="playbook", object_id=pb.id, detail={"sha": sha})
     return {"status": "ok", "sha": sha}
 
 @router.patch("/{playbook_id}")
 async def update_playbook(
     playbook_id: int,
     req: PlaybookUpdate,
-    user: User = Depends(require("content.write")),
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    require_csrf(request)
     pb = await _load_playbook(db, playbook_id)
+    await assert_project_perm(db, user, pb.project_id, "content.write")
     if req.rel_path is not None and req.rel_path != pb.rel_path:
         project = (await db.execute(select(Project).where(Project.id == pb.project_id))).scalar_one()
         repo_path = get_project_repo_path(project.name)
@@ -146,15 +163,20 @@ async def update_playbook(
         pb.name = req.name
     await db.commit()
     await db.refresh(pb)
+    await audit(db, "playbook_updated", actor_user_id=user.id, object_type="playbook", object_id=pb.id)
     return _playbook_response(pb)
 
 @router.delete("/{playbook_id}")
 async def delete_playbook_row(
     playbook_id: int,
-    user: User = Depends(require("content.write")),
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    require_csrf(request)
     pb = await _load_playbook(db, playbook_id)
+    await assert_project_perm(db, user, pb.project_id, "content.write")
     await db.delete(pb)
     await db.commit()
+    await audit(db, "playbook_deleted", actor_user_id=user.id, object_type="playbook", object_id=playbook_id)
     return {"status": "ok"}

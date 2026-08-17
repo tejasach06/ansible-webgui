@@ -7,22 +7,21 @@ from app.db.models import JobMode
 
 class JobRequest(BaseModel):
     template_id: Optional[int] = None
-    playbook_id: int
-    inventory_id: int
-    mode: JobMode = JobMode.live
+    playbook_id: Optional[int] = None
+    inventory_id: Optional[int] = None
+    mode: Optional[JobMode] = None
     limit: Optional[str] = None
     tags: Optional[str] = None
     skip_tags: Optional[str] = None
-    extra_vars: dict = {}
+    extra_vars: Optional[dict] = None
     survey_answers: dict = {}
-    verbosity: int = 0
-    forks: int = 5
-    become: bool = False
+    verbosity: Optional[int] = None
+    forks: Optional[int] = None
+    become: Optional[bool] = None
     become_user: Optional[str] = None
     become_method: Optional[str] = None
-    diff: bool = False
-    credential_ids: List[int] = []
-
+    diff: Optional[bool] = None
+    credential_ids: Optional[List[int]] = None
 
 class ApproveRequest(BaseModel):
     approval_note: Optional[str] = None

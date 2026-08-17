@@ -1,7 +1,135 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Terminal } from "@xterm/xterm"; import { FitAddon } from "@xterm/addon-fit";
-import { useJob, useJobAction, useJobHosts, useJobTasks, useRelaunchJob } from "../api/jobs"; import { useAuth } from "../lib/auth"; import { TERMINAL_JOB_STATUSES } from "../lib/types"; import { Button } from "../components/Button"; import { StatusPill } from "../components/StatusPill"; import { ConfirmDialog } from "../components/ConfirmDialog"; import { Dialog } from "../components/Dialog"; import { TextInput } from "../components/Field"; import { TaskTree } from "../components/TaskTree"; import { HostSummaryTable } from "../components/HostSummaryTable";
-function JobLogTerminal({jobId,status,rc,jumpCounter}:{jobId:number;status?:string;rc?:number|null;jumpCounter?:number|null}){const ref=useRef<HTMLDivElement>(null); const term=useRef<Terminal>(); const source=useRef<EventSource>(); const last=useRef(0); const buffer=useRef<string[]>([]); const counters=useRef<number[]>([]); const truncated=useRef(false); const [down,setDown]=useState(false); const [query,setQuery]=useState(""); const matches=counters.current.map((c,i)=>({c,i,text:buffer.current[i]??""})).filter(x=>query&&x.text.toLowerCase().includes(query.toLowerCase())); useEffect(()=>{if(!ref.current)return; const t=new Terminal({convertEol:true,scrollback:20000,fontFamily:'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',fontSize:13,theme:{background:'#09090b',foreground:'#f4f4f5'}}); const fit=new FitAddon(); t.loadAddon(fit); t.open(ref.current); fit.fit(); term.current=t; const es=new EventSource(`/api/jobs/${jobId}/events/stream?after_counter=0`); source.current=es; es.onmessage=e=>{try{const evt=JSON.parse(e.data); if(evt.counter<=last.current)return; last.current=evt.counter; const text=evt.stdout??""; if(text){buffer.current.push(text); counters.current.push(evt.counter); t.write(text); if(buffer.current.length>5000){buffer.current.shift(); counters.current.shift(); truncated.current=true}}}catch{}}; const resize=()=>fit.fit(); window.addEventListener("resize",resize); return()=>{es.close(); t.dispose(); window.removeEventListener("resize",resize)}},[jobId]); useEffect(()=>{if(jumpCounter&&counters.current.length){const idx=counters.current.findIndex(c=>c>=jumpCounter); if(idx>=0)term.current?.scrollToLine(Math.max(0,idx-4))}},[jumpCounter]); useEffect(()=>{if(TERMINAL_JOB_STATUSES.includes(status as never))setDown(false);else setDown(true)},[status]); return <div className="grid gap-3"><div className="flex flex-wrap items-end justify-between gap-2"><div className="text-sm text-zinc-500">{down?`Stream closed${rc!=null?` · rc ${rc}`:""}`:"Streaming live output…"}</div><TextInput id="log-search" label="Search output" value={query} onChange={e=>setQuery(e.target.value)} /></div>{query&&<div className="text-xs text-zinc-500">{matches.length} matches {matches.slice(0,5).map(m=><button key={m.c} className="ml-2 underline" onClick={()=>term.current?.scrollToLine(Math.max(0,m.i-4))}>#{m.c}</button>)}</div>}{truncated.current&&<div className="text-xs text-amber-600">Search buffer keeps the latest 5000 output lines.</div>}<div ref={ref} className="h-[620px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 p-2" /></div>}
-export function JobDetailPage(){const id=Number(useParams().jobId); const nav=useNavigate(); const {user,can}=useAuth(); const job=useJob(id); const tasks=useJobTasks(id); const hosts=useJobHosts(id); const approve=useJobAction(id,"approve"); const reject=useJobAction(id,"reject"); const cancel=useJobAction(id,"cancel"); const relaunch=useRelaunchJob(id); const [approval,setApproval]=useState(false); const [note,setNote]=useState(""); const [confirm,setConfirm]=useState<"reject"|"cancel"|"relaunch"|"failed"|null>(null); const [params,setParams]=useState(false); const [tab,setTab]=useState<"output"|"tasks"|"hosts">("output"); const [jump,setJump]=useState<number|null>(null); const data=job.data; const snapshot=data?.params_snapshot??{}; const failedHosts=hosts.data?.hosts.filter(h=>["failed","unreachable"].includes(h.status)).map(h=>h.host)??[]; const firstFailure=hosts.data?.hosts.find(h=>h.first_failure_counter)?.first_failure_counter; const rows=[["Mode",data?.mode],["Status",data?.status],["Requested by",data?.requested_by],["Approved by",data?.approved_by??"—"],["Created",data?.created_at??"—"],["Started",data?.started_at??"—"],["Finished",data?.finished_at??"—"],["rc",data?.rc??"—"],["git_sha",String(snapshot.git_sha??"—")],["Relaunch of",data?.relaunch_of_id?`#${data.relaunch_of_id}`:"—"]]; return <section className="grid gap-4"><h1 className="text-xl font-semibold">Job {id} {data&&<StatusPill status={data.status}/>}</h1><div className="rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800"><dl className="grid gap-2 md:grid-cols-2">{rows.map(([k,v])=><div key={k} className="flex gap-2"><dt className="font-medium">{k}:</dt><dd>{String(v)}</dd></div>)}</dl><Button className="mt-3" size="sm" variant="secondary" onClick={()=>setParams(true)}>Show parameters</Button></div><div className="flex gap-2">{data?.status==="pending_approval"&&can("job.approve")&&<><Button disabled={data.requested_by===user?.id} title={data.requested_by===user?.id?"You cannot approve a job you requested.":undefined} onClick={()=>setApproval(true)}>Approve run</Button><Button variant="danger" onClick={()=>setConfirm("reject")}>Reject</Button></>}{data&&["queued","running"].includes(data.status)&&can("job.cancel")&&<Button variant="danger" onClick={()=>setConfirm("cancel")}>Cancel</Button>}{data&&TERMINAL_JOB_STATUSES.includes(data.status)&&can("job.request")&&<><Button variant="secondary" title={`Original sha ${String(snapshot.git_sha??"").slice(0,8)}`} onClick={()=>setConfirm("relaunch")}>Relaunch</Button><Button variant="secondary" disabled={!failedHosts.length} title={failedHosts.length?`Limit ${failedHosts.join(",")}; sha ${String(snapshot.git_sha??"").slice(0,8)}`:"No failed hosts"} onClick={()=>setConfirm("failed")}>Relaunch failed hosts</Button></>}</div>{data?.stats&&<table className="w-full rounded-lg border text-sm dark:border-zinc-800"><tbody>{Object.entries(data.stats).map(([k,v])=><tr key={k} className="border-b dark:border-zinc-800"><th className="px-3 py-2 text-left">{k}</th><td className="px-3 py-2"><pre>{JSON.stringify(v)}</pre></td></tr>)}</tbody></table>}<div className="flex gap-2"><Button size="sm" variant={tab==="output"?"primary":"secondary"} onClick={()=>setTab("output")}>Output</Button><Button size="sm" variant={tab==="tasks"?"primary":"secondary"} onClick={()=>setTab("tasks")}>Tasks</Button><Button size="sm" variant={tab==="hosts"?"primary":"secondary"} onClick={()=>setTab("hosts")}>Hosts</Button><Button size="sm" variant="secondary" disabled={!firstFailure} onClick={()=>{setTab("output");setJump(firstFailure??null)}}>Jump to first failure</Button></div>{tab==="output"&&<JobLogTerminal jobId={id} status={data?.status} rc={data?.rc} jumpCounter={jump}/>} {tab==="tasks"&&<TaskTree data={tasks.data} onJump={(c)=>{setTab("output");setJump(c)}}/>} {tab==="hosts"&&<HostSummaryTable data={hosts.data}/>}<Dialog open={params} onClose={()=>setParams(false)} title="Job parameters"><pre className="overflow-auto text-xs">{JSON.stringify(snapshot,null,2)}</pre></Dialog><Dialog open={approval} onClose={()=>{setApproval(false);setNote("")}} title="Approve run"><TextInput id="note" label="Approval note" value={note} onChange={e=>setNote(e.target.value)}/><div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={()=>setApproval(false)}>Cancel</Button><Button loading={approve.isPending} onClick={()=>approve.mutate({approval_note:note},{onSuccess:()=>{setApproval(false);setNote("")}})}>Approve</Button></div></Dialog><ConfirmDialog open={!!confirm} title={confirm==="reject"?"Reject job?":confirm==="cancel"?"Cancel job?":confirm==="failed"?"Relaunch failed hosts?":"Relaunch job?"} name={confirm==="failed"?`${failedHosts.join(",")} @ ${String(snapshot.git_sha??"").slice(0,8)}`:`job ${id}`} onClose={()=>setConfirm(null)} onConfirm={()=>{if(confirm==="reject")reject.mutate(undefined,{onSuccess:()=>setConfirm(null)}); if(confirm==="cancel")cancel.mutate(undefined,{onSuccess:()=>setConfirm(null)}); if(confirm==="relaunch")relaunch.mutate({hosts:"all"},{onSuccess:(r)=>nav(`/jobs/${r.id}`)}); if(confirm==="failed")relaunch.mutate({hosts:"failed"},{onSuccess:(r)=>nav(`/jobs/${r.id}`)})}} /></section>}
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { useJob, useJobAction, useJobReport, useRelaunchJob } from "../api/jobs";
+import { useAuth } from "../lib/auth";
+import { TERMINAL_JOB_STATUSES } from "../lib/types";
+import { Button } from "../components/Button";
+import { StatusPill } from "../components/StatusPill";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Dialog } from "../components/Dialog";
+import { TextInput } from "../components/Field";
+import { TaskTree } from "../components/TaskTree";
+import { HostMatrix } from "../components/HostMatrix";
+import { ErrorBanner } from "../components/ErrorBanner";
+
+function JobLogTerminal({ jobId, status, rc, jumpCounter }: { jobId: number; status?: string; rc?: number | null; jumpCounter?: number | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const term = useRef<Terminal>();
+  const last = useRef(0);
+  const buffer = useRef<string[]>([]);
+  const counters = useRef<number[]>([]);
+  const truncated = useRef(false);
+  const [down, setDown] = useState(false);
+  const [query, setQuery] = useState("");
+  const matches = counters.current.map((counter, index) => ({ counter, index, text: buffer.current[index] ?? "" })).filter((row) => query && row.text.toLowerCase().includes(query.toLowerCase()));
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const terminal = new Terminal({ convertEol: true, scrollback: 20000, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace', fontSize: 13, theme: { background: "#09090b", foreground: "#f4f4f5" } });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(ref.current);
+    fit.fit();
+    term.current = terminal;
+    const source = new EventSource(`/api/jobs/${jobId}/events/stream?after_counter=0`);
+    source.onmessage = (event) => {
+      try {
+        const evt = JSON.parse(event.data);
+        if (evt.counter <= last.current) return;
+        last.current = evt.counter;
+        const text = evt.stdout ?? "";
+        if (text) {
+          buffer.current.push(text);
+          counters.current.push(evt.counter);
+          terminal.write(text);
+          if (buffer.current.length > 5000) {
+            buffer.current.shift();
+            counters.current.shift();
+            truncated.current = true;
+          }
+        }
+      } catch { /* ignore malformed SSE frames */ }
+    };
+    const resize = () => fit.fit();
+    window.addEventListener("resize", resize);
+    return () => { source.close(); terminal.dispose(); window.removeEventListener("resize", resize); };
+  }, [jobId]);
+
+  useEffect(() => {
+    if (jumpCounter && counters.current.length) {
+      const index = counters.current.findIndex((counter) => counter >= jumpCounter);
+      if (index >= 0) term.current?.scrollToLine(Math.max(0, index - 4));
+    }
+  }, [jumpCounter]);
+
+  useEffect(() => {
+    setDown(!TERMINAL_JOB_STATUSES.includes(status as never));
+  }, [status]);
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div className="text-sm text-zinc-500">{down ? `Stream closed${rc != null ? ` · rc ${rc}` : ""}` : "Streaming live output…"}</div>
+        <TextInput id="log-search" label="Search output" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </div>
+      {query && <div className="text-xs text-zinc-500">{matches.length} matches {matches.slice(0, 5).map((match) => <button key={match.counter} className="ml-2 underline" onClick={() => term.current?.scrollToLine(Math.max(0, match.index - 4))}>#{match.counter}</button>)}</div>}
+      {truncated.current && <div className="text-xs text-amber-600">Search buffer keeps the latest 5000 output lines.</div>}
+      <div ref={ref} className="h-[620px] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 p-2" />
+    </div>
+  );
+}
+
+export function JobDetailPage() {
+  const id = Number(useParams().jobId);
+  const navigate = useNavigate();
+  const { user, can } = useAuth();
+  const job = useJob(id);
+  const report = useJobReport(id);
+  const approve = useJobAction(id, "approve");
+  const reject = useJobAction(id, "reject");
+  const cancel = useJobAction(id, "cancel");
+  const relaunch = useRelaunchJob(id);
+  const [approval, setApproval] = useState(false);
+  const [note, setNote] = useState("");
+  const [confirm, setConfirm] = useState<"reject" | "cancel" | "relaunch" | "failed" | null>(null);
+  const [tab, setTab] = useState<"output" | "report" | "params">("output");
+  const [jump, setJump] = useState<number | null>(null);
+  const data = job.data;
+  const snapshot = data?.params_snapshot ?? {};
+  const failedHosts = report.data?.hosts.filter((host) => ["failed", "unreachable"].includes(host.status)).map((host) => host.host) ?? [];
+  const firstFailure = report.data?.hosts.find((host) => host.first_failure_counter)?.first_failure_counter;
+  const rows = [["Mode", data?.mode], ["Status", data?.status], ["Requested by", data?.requested_by], ["Approved by", data?.approved_by ?? "—"], ["Created", data?.created_at ?? "—"], ["Started", data?.started_at ?? "—"], ["Finished", data?.finished_at ?? "—"], ["rc", data?.rc ?? "—"], ["git_sha", String(snapshot.git_sha ?? "—")], ["Relaunch of", data?.relaunch_of_id ? `#${data.relaunch_of_id}` : "—"]];
+
+  const jumpToOutput = (counter: number) => { setTab("output"); setJump(counter); };
+
+  return (
+    <section className="grid gap-4">
+      <h1 className="text-xl font-semibold">Job {id} {data && <StatusPill status={data.status} />}</h1>
+      {job.error && <ErrorBanner error={job.error} />}
+      {report.error && <ErrorBanner error={report.error} />}
+      <div className="rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
+        <dl className="grid gap-2 md:grid-cols-2">{rows.map(([key, value]) => <div key={key} className="flex gap-2"><dt className="font-medium">{key}:</dt><dd>{String(value)}</dd></div>)}</dl>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {data?.status === "pending_approval" && can("job.approve") && <><Button disabled={data.requested_by === user?.id} title={data.requested_by === user?.id ? "You cannot approve a job you requested." : undefined} onClick={() => setApproval(true)}>Approve run</Button><Button variant="danger" onClick={() => setConfirm("reject")}>Reject</Button></>}
+        {data && ["queued", "running"].includes(data.status) && can("job.cancel") && <Button variant="danger" onClick={() => setConfirm("cancel")}>Cancel</Button>}
+        {data && TERMINAL_JOB_STATUSES.includes(data.status) && can("job.request") && <><Button variant="secondary" title={`Original sha ${String(snapshot.git_sha ?? "").slice(0, 8)}`} onClick={() => setConfirm("relaunch")}>Relaunch</Button><Button variant="secondary" disabled={!failedHosts.length} title={failedHosts.length ? `Limit ${failedHosts.join(",")}; sha ${String(snapshot.git_sha ?? "").slice(0, 8)}` : "No failed hosts"} onClick={() => setConfirm("failed")}>Relaunch failed hosts</Button></>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant={tab === "output" ? "primary" : "secondary"} onClick={() => setTab("output")}>Output</Button>
+        <Button size="sm" variant={tab === "report" ? "primary" : "secondary"} onClick={() => setTab("report")}>Report</Button>
+        <Button size="sm" variant={tab === "params" ? "primary" : "secondary"} onClick={() => setTab("params")}>Params</Button>
+        <Button size="sm" variant="secondary" disabled={!firstFailure} onClick={() => firstFailure && jumpToOutput(firstFailure)}>Jump to first failure</Button>
+      </div>
+      {tab === "output" && <JobLogTerminal jobId={id} status={data?.status} rc={data?.rc} jumpCounter={jump} />}
+      {tab === "report" && <div className="grid gap-4">{data?.stats && <table className="w-full rounded-lg border text-sm dark:border-zinc-800"><tbody>{Object.entries(data.stats).map(([key, value]) => <tr key={key} className="border-b dark:border-zinc-800"><th className="px-3 py-2 text-left">{key}</th><td className="px-3 py-2"><pre>{JSON.stringify(value)}</pre></td></tr>)}</tbody></table>}<HostMatrix data={report.data} onJump={jumpToOutput} /><TaskTree data={report.data} onJump={jumpToOutput} /></div>}
+      {tab === "params" && <pre className="overflow-auto rounded-lg border border-zinc-200 p-4 text-xs dark:border-zinc-800">{JSON.stringify(snapshot, null, 2)}</pre>}
+      <Dialog open={approval} onClose={() => { setApproval(false); setNote(""); }} title="Approve run"><TextInput id="note" label="Approval note" value={note} onChange={(event) => setNote(event.target.value)} /><div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={() => setApproval(false)}>Cancel</Button><Button loading={approve.isPending} onClick={() => approve.mutate({ approval_note: note }, { onSuccess: () => { setApproval(false); setNote(""); } })}>Approve</Button></div></Dialog>
+      <ConfirmDialog open={!!confirm} title={confirm === "reject" ? "Reject job?" : confirm === "cancel" ? "Cancel job?" : confirm === "failed" ? "Relaunch failed hosts?" : "Relaunch job?"} name={confirm === "failed" ? `${failedHosts.join(",")} @ ${String(snapshot.git_sha ?? "").slice(0, 8)}` : `job ${id}`} onClose={() => setConfirm(null)} onConfirm={() => { if (confirm === "reject") reject.mutate(undefined, { onSuccess: () => setConfirm(null) }); if (confirm === "cancel") cancel.mutate(undefined, { onSuccess: () => setConfirm(null) }); if (confirm === "relaunch") relaunch.mutate({ hosts: "all" }, { onSuccess: (result) => navigate(`/jobs/${result.id}`) }); if (confirm === "failed") relaunch.mutate({ hosts: "failed" }, { onSuccess: (result) => navigate(`/jobs/${result.id}`) }); }} />
+    </section>
+  );
+}
+
 export default JobDetailPage;

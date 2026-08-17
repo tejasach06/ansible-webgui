@@ -5,7 +5,7 @@ import tempfile
 import redis
 import ansible_runner
 from app.tasks.worker import celery_app
-from app.db.session import SyncSessionLocal
+from app.services.run_report import ReportBuilder
 from app.db.models import JobRun, JobStatus, JobEvent, Project, Playbook
 from app.tasks.job_workspace import export_inventory_snapshot, export_project_snapshot, materialize_credentials
 from app.services.credentials import decrypt_payload
@@ -56,6 +56,26 @@ def run_job(job_run_id: int):
             events_batch = []
             event_counter = 0
             stats_from_event = None
+            report_builder = ReportBuilder(job.id)
+
+            def _flush_report():
+                plays, tasks, host_results = report_builder.pending()
+                if plays:
+                    db.add_all(plays)
+                    db.flush()
+                if tasks:
+                    for t in tasks:
+                        if getattr(t, "_play_obj", None) and hasattr(t._play_obj, "id") and t._play_obj.id:
+                            t.play_id = t._play_obj.id
+                    db.add_all(tasks)
+                    db.flush()
+                if host_results:
+                    for hr in host_results:
+                        if getattr(hr, "_task_obj", None) and hasattr(hr._task_obj, "id") and hr._task_obj.id:
+                            hr.task_id = hr._task_obj.id
+                    db.add_all(host_results)
+                    db.flush()
+                report_builder.clear()
 
             def event_handler(event_data):
                 nonlocal event_counter, stats_from_event
@@ -68,6 +88,8 @@ def run_job(job_run_id: int):
                     stats_from_event = event_data.get("event_data")
                 if len(stdout_text) > 65536:
                     stdout_text = stdout_text[:65536] + "\n...[truncated]"
+
+                report_builder.handle(event_counter, event_data.get("event", ""), event_data.get("host"), event_data)
 
                 ev = JobEvent(
                     job_run_id=job.id,
@@ -93,9 +115,9 @@ def run_job(job_run_id: int):
 
                 if len(events_batch) >= 50:
                     db.bulk_save_objects(events_batch)
+                    _flush_report()
                     db.commit()
                     events_batch.clear()
-
             def cancel_callback():
                 return redis_client.get(f"job:{job.id}:cancel") == b"1"
 
@@ -122,6 +144,7 @@ def run_job(job_run_id: int):
 
             if events_batch:
                 db.bulk_save_objects(events_batch)
+                _flush_report()
                 db.commit()
             job.stats = runner.stats or stats_from_event
             job.rc = runner.rc

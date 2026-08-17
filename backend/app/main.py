@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from app.api import auth, users, credentials, projects, playbooks, inventories, job_templates, jobs, content, schedules, audit, notifications
+from app.api import auth, users, credentials, projects, playbooks, inventories, job_templates, jobs, pipelines, content, schedules, audit, notifications
 
 app = FastAPI(title="Ansible WebGUI API", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -12,6 +12,7 @@ app.include_router(playbooks.router)
 app.include_router(inventories.router)
 app.include_router(job_templates.router)
 app.include_router(jobs.router)
+app.include_router(pipelines.router)
 app.include_router(content.router)
 app.include_router(schedules.router)
 app.include_router(audit.router)
@@ -19,13 +20,16 @@ app.include_router(notifications.router)
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        if isinstance(exc.detail, dict):
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return JSONResponse(status_code=exc.status_code, content={"detail": {"code": "error", "message": str(exc.detail)}})
     code = getattr(exc, "code", "internal_error")
     detail = getattr(exc, "detail", str(exc))
     return JSONResponse(
         status_code=getattr(exc, "status_code", 500),
-        content={"detail": {"code": code, "message": detail}}
+        content={"detail": {"code": code, "message": str(detail)}}
     )
-
 @app.on_event("startup")
 async def startup():
     from app.db.seed import seed_roles_and_admin

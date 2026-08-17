@@ -4,7 +4,7 @@ from app.db.models import User, Role
 from app.core.security import hash_password
 from app.core.config import settings
 
-ROLES = ["admin", "manager", "developer", "operator", "viewer"]
+ROLES = ["admin", "user", "auditor"]
 
 async def seed_roles_and_admin():
     async with AsyncSessionLocal() as session:

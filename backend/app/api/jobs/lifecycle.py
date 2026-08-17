@@ -1,23 +1,25 @@
+from typing import Optional, List
 import redis.asyncio as aioredis
 import json
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from git import Repo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import require
+from app.api.auth import require, get_current_user
 from app.api.jobs.schemas import ApproveRequest, JobRequest, RelaunchRequest
 from app.core.config import settings
-from app.db.models import Credential, Inventory, JobEvent, JobMode, JobRun, JobStatus, JobTemplate, Playbook, Project, User
+from app.db.models import Credential, Inventory, JobEvent, JobMode, JobRun, JobStatus, JobTemplate, Playbook, Project, User, JobHostResult, HostResultStatus, PipelineRun, PipelineStep, PipelineStatus, ProjectMembership
 from app.db.session import get_db
 from app.services.approvals import approve_job_run, freeze_params_snapshot
 from app.services.audit import audit
 from app.services.content import get_inventory_repo_path, get_project_repo_path
 from app.services.credentials import encrypt_payload
-from app.services.surveys import apply_survey
-from app.services.job_events import RELEVANT_EVENTS, build_host_summary
+from app.services.rbac_scope import assert_project_perm, _user_global_perms
+from app.services.launch import resolve_launch
+from app.services.rbac_scope import assert_project_perm
 from app.tasks.run_job import run_job
-
 
 router = APIRouter()
 
@@ -25,19 +27,64 @@ router = APIRouter()
 @router.post("")
 async def request_job(
     req: JobRequest,
-    user: User = Depends(require("job.request")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    playbook = (await db.execute(select(Playbook).where(Playbook.id == req.playbook_id))).scalar_one_or_none()
+    template = None
+    if req.template_id:
+        template = (await db.execute(select(JobTemplate).where(JobTemplate.id == req.template_id))).scalar_one_or_none()
+        if not template:
+            raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
+
+    playbook_id = req.playbook_id or (template.playbook_id if template else None)
+    if not playbook_id:
+        raise HTTPException(status_code=422, detail={"code": "playbook_required", "message": "playbook_id or template_id is required"})
+
+    playbook = (await db.execute(select(Playbook).where(Playbook.id == playbook_id))).scalar_one_or_none()
     if not playbook:
         raise HTTPException(status_code=404, detail={"code": "playbook_not_found", "message": "Playbook not found"})
+    if template is None:
+        global_perms = await _user_global_perms(db, user)
+        if "system.admin" not in global_perms:
+            res = await db.execute(select(ProjectMembership).where(ProjectMembership.project_id == playbook.project_id, ProjectMembership.user_id == user.id))
+            membership = res.scalar_one_or_none()
+            role_str = membership.role.value if hasattr(membership.role, "value") else str(membership.role) if membership else ""
+            if role_str != "owner":
+                raise HTTPException(status_code=403, detail={"code": "adhoc_forbidden", "message": "Ad-hoc runs require project admin"})
+    else:
+        req_mode = req.mode or JobMode.live
+        perm = "job.run_check" if req_mode == JobMode.check else "job.request"
+        await assert_project_perm(db, user, playbook.project_id, perm)
 
-    inventory = (await db.execute(select(Inventory).where(Inventory.id == req.inventory_id))).scalar_one_or_none()
+    survey_vars = set()
+    secret_vars = {}
+    if template and template.survey_spec:
+        try:
+            plain_vars, secret_vars = apply_survey(template.survey_spec, req.survey_answers)
+            survey_vars = set(plain_vars.keys()) | set(secret_vars.keys())
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail={"code": str(e), "message": str(e)})
+
+    try:
+        effective, overrides = resolve_launch(template, req, survey_vars)
+    except ValueError as e:
+        msg = str(e)
+        if msg.startswith("override_not_allowed:"):
+            fields = [f.strip() for f in msg.split(":", 1)[1].split(",") if f.strip()]
+            raise HTTPException(status_code=422, detail={"code": "override_not_allowed", "message": "Field not permitted at launch", "fields": fields})
+        raise
+
+    inventory_id = effective["inventory_id"]
+    if not inventory_id:
+        raise HTTPException(status_code=422, detail={"code": "inventory_required", "message": "inventory_id is required"})
+
+    inventory = (await db.execute(select(Inventory).where(Inventory.id == inventory_id))).scalar_one_or_none()
     if not inventory:
         raise HTTPException(status_code=404, detail={"code": "inventory_not_found", "message": "Inventory not found"})
 
-    if req.credential_ids:
-        rows = (await db.execute(select(Credential.name, Credential.username).where(Credential.id.in_(req.credential_ids), Credential.username.isnot(None)))).all()
+    cred_ids = effective["credential_ids"]
+    if cred_ids:
+        rows = (await db.execute(select(Credential.name, Credential.username).where(Credential.id.in_(cred_ids), Credential.username.isnot(None)))).all()
         usernames = {username for _, username in rows}
         if len(usernames) > 1:
             raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set different usernames", "credentials": [name for name, _ in rows]})
@@ -51,8 +98,8 @@ async def request_job(
         raise HTTPException(status_code=404, detail={"code": "inventory_repo_missing", "message": "Shared inventory repo is not initialized. Restart the API."})
     inventory_git_sha = Repo(inventory_repo_path).head.commit.hexsha
 
-    # Check for active live runs of the same template
-    if req.template_id and req.mode == JobMode.live:
+    mode_val = effective["mode"]
+    if req.template_id and mode_val == JobMode.live:
         active = (await db.execute(
             select(JobRun).where(
                 JobRun.template_id == req.template_id,
@@ -63,50 +110,41 @@ async def request_job(
         if active:
             raise HTTPException(status_code=409, detail={"code": "template_busy", "message": "Template has a queued/running live run"})
 
-    requires_appr = True
-    tmpl = None
-    if req.template_id:
-        tmpl = (await db.execute(select(JobTemplate).where(JobTemplate.id == req.template_id))).scalar_one_or_none()
-        if tmpl:
-            requires_appr = tmpl.requires_approval
-
+    requires_appr = template.requires_approval if template else True
     mode_status = JobStatus.pending_approval
-    if req.mode == JobMode.check or not requires_appr:
+    if mode_val == JobMode.check or not requires_appr:
         mode_status = JobStatus.queued
-    extra_vars = req.extra_vars
-    secret_vars = {}
-    if tmpl and tmpl.survey_spec:
-        try:
-            plain_vars, secret_vars = apply_survey(tmpl.survey_spec, req.survey_answers)
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail={"code": str(e), "message": str(e)})
-        extra_vars = {**(tmpl.extra_vars or {}), **plain_vars, **req.extra_vars}
+
+    extra_vars = effective["extra_vars"]
+    if template and template.survey_spec and secret_vars:
+        extra_vars = {**extra_vars, **{k: "$encrypted$" for k in secret_vars}}
 
     snapshot = freeze_params_snapshot(
         project_git_path=str(repo_path),
         playbook_rel_path=playbook.rel_path,
         inventory_rel_path=inventory.rel_path,
-        mode=req.mode.value,
-        limit=req.limit,
-        tags=req.tags,
-        skip_tags=req.skip_tags,
-        extra_vars={**extra_vars, **{k: "$encrypted$" for k in secret_vars}},
-        verbosity=req.verbosity,
-        forks=req.forks,
-        become=req.become,
-        become_user=req.become_user,
-        become_method=req.become_method,
-        diff=req.diff,
-        credential_ids=req.credential_ids,
+        mode=mode_val.value if hasattr(mode_val, "value") else str(mode_val),
+        limit=effective["limit"],
+        tags=effective["tags"],
+        skip_tags=effective["skip_tags"],
+        extra_vars=extra_vars,
+        verbosity=effective["verbosity"],
+        forks=effective["forks"],
+        become=effective["become"],
+        become_user=effective["become_user"],
+        become_method=effective["become_method"],
+        diff=effective["diff"],
+        credential_ids=effective["credential_ids"],
         git_sha=git_sha,
         inventory_git_sha=inventory_git_sha,
+        overrides=overrides,
     )
 
     job = JobRun(
         template_id=req.template_id,
-        playbook_id=req.playbook_id,
-        inventory_id=req.inventory_id,
-        mode=req.mode,
+        playbook_id=playbook.id,
+        inventory_id=inventory.id,
+        mode=mode_val,
         status=mode_status,
         requested_by=user.id,
         params_snapshot=snapshot,
@@ -132,19 +170,31 @@ async def request_job(
 async def relaunch_job(
     job_id: int,
     req: RelaunchRequest,
-    user: User = Depends(require("job.request")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     source = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
+
+    playbook = (await db.execute(select(Playbook).where(Playbook.id == source.playbook_id))).scalar_one_or_none()
+    if playbook:
+        await assert_project_perm(db, user, playbook.project_id, "job.request")
     if source.status not in {JobStatus.successful, JobStatus.failed, JobStatus.canceled, JobStatus.timed_out}:
         raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Source run has not finished"})
     snapshot = dict(source.params_snapshot or {})
     mode = req.mode or source.mode
     if req.hosts == "failed":
-        rows = (await db.execute(select(JobEvent.counter, JobEvent.event, JobEvent.host, JobEvent.payload).where(JobEvent.job_run_id == source.id, JobEvent.event.in_(RELEVANT_EVENTS)).order_by(JobEvent.counter.asc()))).all()
-        failed_hosts = [h["host"] for h in build_host_summary(rows)["hosts"] if h["status"] in {"failed", "unreachable"}]
+        res = await db.execute(
+            select(JobHostResult.host)
+            .where(
+                JobHostResult.job_run_id == source.id,
+                JobHostResult.status.in_([HostResultStatus.failed, HostResultStatus.unreachable]),
+                JobHostResult.ignore_errors.is_(False),
+            )
+            .distinct()
+        )
+        failed_hosts = list(res.scalars().all())
         if not failed_hosts:
             raise HTTPException(status_code=409, detail={"code": "no_failed_hosts", "message": "No failed hosts"})
         snapshot["limit"] = ",".join(failed_hosts)
@@ -174,16 +224,21 @@ async def relaunch_job(
 @router.post("/{job_id}/approve")
 async def approve_job(
     job_id: int,
-    req: ApproveRequest,
-    user: User = Depends(require("job.approve")),
+    req: Optional[ApproveRequest] = None,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
 
+    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
+    if playbook:
+        await assert_project_perm(db, user, playbook.project_id, "job.approve")
+
+    note = req.approval_note if req else None
     try:
-        job = await approve_job_run(db, job, user.id, req.approval_note)
+        job = await approve_job_run(db, job, user.id, note)
     except ValueError as e:
         err_code = str(e)
         if err_code == "self_approval_forbidden":
@@ -192,9 +247,17 @@ async def approve_job(
             raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Job is not in pending_approval state"})
         raise HTTPException(status_code=400, detail={"code": "error", "message": str(e)})
 
-    task = run_job.delay(job.id)
-    job.celery_task_id = task.id
-    await db.commit()
+    if job.pipeline_run_id:
+        step = (await db.execute(select(PipelineStep).where(PipelineStep.id == job.pipeline_step_id))).scalar_one_or_none()
+        resume_pos = step.position if step else 0
+        from app.tasks.run_pipeline import run_pipeline
+        task = run_pipeline.delay(job.pipeline_run_id, resume_from=resume_pos)
+        job.celery_task_id = task.id
+        await db.commit()
+    else:
+        task = run_job.delay(job.id)
+        job.celery_task_id = task.id
+        await db.commit()
 
     await audit(db, "job_approved", actor_user_id=user.id, object_type="job_run", object_id=job.id)
     return {"id": job.id, "status": job.status}
@@ -203,17 +266,26 @@ async def approve_job(
 @router.post("/{job_id}/reject")
 async def reject_job(
     job_id: int,
-    user: User = Depends(require("job.approve")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
 
+    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
+    if playbook:
+        await assert_project_perm(db, user, playbook.project_id, "job.approve")
+
     if job.status != JobStatus.pending_approval:
         raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Job is not in pending_approval state"})
 
     job.status = JobStatus.rejected
+    if job.pipeline_run_id:
+        prun = (await db.execute(select(PipelineRun).where(PipelineRun.id == job.pipeline_run_id))).scalar_one_or_none()
+        if prun:
+            prun.status = PipelineStatus.failed
+            prun.finished_at = datetime.utcnow()
     await db.commit()
     await audit(db, "job_rejected", actor_user_id=user.id, object_type="job_run", object_id=job.id)
     return {"id": job.id, "status": job.status}
@@ -222,12 +294,16 @@ async def reject_job(
 @router.post("/{job_id}/cancel")
 async def cancel_job(
     job_id: int,
-    user: User = Depends(require("job.cancel")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
+
+    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
+    if playbook:
+        await assert_project_perm(db, user, playbook.project_id, "job.cancel")
     if job.status in (
         JobStatus.successful,
         JobStatus.failed,

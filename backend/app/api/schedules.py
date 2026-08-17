@@ -8,9 +8,10 @@ from croniter import croniter
 from redbeat import RedBeatSchedulerEntry
 from app.db.session import get_db
 from app.db.models import Schedule, JobTemplate, User
-from app.api.auth import require
+from app.api.auth import get_current_user
 from app.tasks.worker import celery_app
 from app.services.audit import audit
+from app.services.rbac_scope import assert_project_perm, visible_project_ids
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 
@@ -28,10 +29,14 @@ class ScheduleUpdate(BaseModel):
 
 @router.get("")
 async def list_schedules(
-    user: User = Depends(require("read")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    schedules = (await db.execute(select(Schedule))).scalars().all()
+    query = select(Schedule)
+    visible_ids = await visible_project_ids(db, user)
+    if visible_ids is not None:
+        query = query.where(Schedule.template_id.in_(select(JobTemplate.id).where(JobTemplate.project_id.in_(visible_ids))))
+    schedules = (await db.execute(query)).scalars().all()
     return [{
         "id": s.id,
         "template_id": s.template_id,
@@ -45,7 +50,7 @@ async def list_schedules(
 @router.post("")
 async def create_schedule(
     req: ScheduleCreate,
-    user: User = Depends(require("schedule.write")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     if not croniter.is_valid(req.cron_expr):
@@ -59,6 +64,7 @@ async def create_schedule(
     template = (await db.execute(select(JobTemplate).where(JobTemplate.id == req.template_id))).scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
+    await assert_project_perm(db, user, template.project_id, "schedule.write")
 
     redbeat_key = f"redbeat:job:{req.name}"
 
@@ -91,12 +97,16 @@ async def create_schedule(
 async def update_schedule(
     schedule_id: int,
     req: ScheduleUpdate,
-    user: User = Depends(require("schedule.write")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     sched = (await db.execute(select(Schedule).where(Schedule.id == schedule_id))).scalar_one_or_none()
     if not sched:
         raise HTTPException(status_code=404, detail={"code": "schedule_not_found", "message": "Schedule not found"})
+    template = (await db.execute(select(JobTemplate).where(JobTemplate.id == sched.template_id))).scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
+    await assert_project_perm(db, user, template.project_id, "schedule.write")
 
     if req.cron_expr and not croniter.is_valid(req.cron_expr):
         raise HTTPException(status_code=422, detail={"code": "bad_cron", "message": "Invalid cron expression"})
@@ -112,17 +122,22 @@ async def update_schedule(
 
     await db.commit()
     await db.refresh(sched)
+    await audit(db, "schedule_updated", actor_user_id=user.id, object_type="schedule", object_id=sched.id)
     return {"id": sched.id, "name": sched.name}
 
 @router.delete("/{schedule_id}")
 async def delete_schedule(
     schedule_id: int,
-    user: User = Depends(require("schedule.write")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     sched = (await db.execute(select(Schedule).where(Schedule.id == schedule_id))).scalar_one_or_none()
     if not sched:
         raise HTTPException(status_code=404, detail={"code": "schedule_not_found", "message": "Schedule not found"})
+    template = (await db.execute(select(JobTemplate).where(JobTemplate.id == sched.template_id))).scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
+    await assert_project_perm(db, user, template.project_id, "schedule.write")
 
     try:
         entry = RedBeatSchedulerEntry.from_key(sched.redbeat_key, app=celery_app)

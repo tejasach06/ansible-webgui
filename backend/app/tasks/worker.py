@@ -5,7 +5,7 @@ celery_app = Celery(
     "ansible_webgui",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.run_job", "app.tasks.notify"],
+    include=["app.tasks.run_job", "app.tasks.notify", "app.tasks.run_pipeline"],
 )
 
 celery_app.conf.update(

@@ -5,8 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.db.session import get_db
-from app.db.models import Project, Playbook, JobRun, JobStatus, User
-from app.api.auth import require
+from app.db.models import Project, Playbook, JobRun, JobStatus, User, ProjectMembership, ProjectRole
+from app.api.auth import require, require_project
+from app.services.rbac_scope import visible_project_ids
 from app.services.audit import audit
 from app.services.content import init_project_repo, get_project_repo_path
 from app.core.config import settings
@@ -19,7 +20,8 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     default_branch: Optional[str] = None
-
+class MemberRoleUpdate(BaseModel):
+    role: ProjectRole
 def _project_response(p: Project):
     return {"id": p.id, "name": p.name, "git_path": p.git_path, "default_branch": p.default_branch, "is_inventory_repo": p.name == settings.INVENTORY_REPO_NAME}
 
@@ -32,13 +34,28 @@ async def list_projects(
     user: User = Depends(require("read")),
     db: AsyncSession = Depends(get_db)
 ):
-    projects = (await db.execute(select(Project))).scalars().all()
+    vids = await visible_project_ids(db, user)
+    stmt = select(Project)
+    if vids is not None:
+        stmt = stmt.where(Project.id.in_(vids))
+    projects = (await db.execute(stmt)).scalars().all()
     return [_project_response(p) for p in projects]
+
+@router.get("/{project_id}")
+async def get_project(
+    project_id: int,
+    user: User = Depends(require_project("read")),
+    db: AsyncSession = Depends(get_db)
+):
+    p = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail={"code": "project_not_found", "message": "Project not found"})
+    return _project_response(p)
 
 @router.post("")
 async def create_project(
     req: ProjectCreate,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(require("project.create")),
     db: AsyncSession = Depends(get_db)
 ):
     if req.name == settings.INVENTORY_REPO_NAME:
@@ -51,16 +68,19 @@ async def create_project(
     p = Project(name=req.name, git_path=f"/data/content/{req.name}", default_branch="main")
     db.add(p)
     await db.commit()
+    db.add(ProjectMembership(project_id=p.id, user_id=user.id, role=ProjectRole.owner))
+    await db.commit()
     await db.refresh(p)
 
     await init_project_repo(db, p, user.username, user.email)
+    await audit(db, "project_created", actor_user_id=user.id, object_type="project", object_id=p.id)
     return _project_response(p)
 
 @router.patch("/{project_id}")
 async def update_project(
     project_id: int,
     req: ProjectUpdate,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(require_project("project.admin")),
     db: AsyncSession = Depends(get_db)
 ):
     p = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
@@ -105,7 +125,7 @@ async def update_project(
 @router.delete("/{project_id}")
 async def delete_project(
     project_id: int,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(require_project("project.admin")),
     db: AsyncSession = Depends(get_db)
 ):
     p = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
@@ -122,4 +142,93 @@ async def delete_project(
 
     await db.delete(p)
     await db.commit()
+    await audit(db, "project_deleted", actor_user_id=user.id, object_type="project", object_id=project_id)
     return {"status": "ok"}
+@router.get("/{project_id}/members")
+async def list_members(
+    project_id: int,
+    user: User = Depends(require_project("read")),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(
+        select(ProjectMembership, User.username)
+        .join(User, ProjectMembership.user_id == User.id)
+        .where(ProjectMembership.project_id == project_id)
+    )
+    rows = res.all()
+    return [
+        {
+            "user_id": m.user_id,
+            "username": uname,
+            "role": m.role.value if hasattr(m.role, "value") else str(m.role),
+        }
+        for m, uname in rows
+    ]
+
+@router.put("/{project_id}/members/{target_user_id}")
+async def upsert_member(
+    project_id: int,
+    target_user_id: int,
+    req: MemberRoleUpdate,
+    user: User = Depends(require_project("project.admin")),
+    db: AsyncSession = Depends(get_db)
+):
+    target_user = (await db.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail={"code": "user_not_found", "message": "User not found"})
+
+    res = await db.execute(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == target_user_id,
+        )
+    )
+    membership = res.scalar_one_or_none()
+    if membership:
+        membership.role = req.role
+    else:
+        membership = ProjectMembership(project_id=project_id, user_id=target_user_id, role=req.role)
+        db.add(membership)
+
+    await db.commit()
+    await audit(db, "member_granted", actor_user_id=user.id, object_type="project_membership", object_id=project_id, detail={"user_id": target_user_id, "role": req.role.value if hasattr(req.role, "value") else str(req.role)})
+    return {
+        "user_id": target_user_id,
+        "username": target_user.username,
+        "role": req.role.value if hasattr(req.role, "value") else str(req.role),
+    }
+
+@router.delete("/{project_id}/members/{target_user_id}", status_code=204)
+async def delete_member(
+    project_id: int,
+    target_user_id: int,
+    user: User = Depends(require_project("project.admin")),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == target_user_id,
+        )
+    )
+    membership = res.scalar_one_or_none()
+    if not membership:
+        raise HTTPException(status_code=404, detail={"code": "member_not_found", "message": "Membership not found"})
+
+    role_str = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
+    if role_str == "owner":
+        owner_count = (
+            await db.execute(
+                select(func.count(ProjectMembership.id)).where(
+                    ProjectMembership.project_id == project_id,
+                    ProjectMembership.role == ProjectRole.owner,
+                )
+            )
+        ).scalar_one()
+        if owner_count <= 1:
+            raise HTTPException(status_code=409, detail={"code": "last_owner", "message": "Project must retain an owner"})
+
+    await db.delete(membership)
+    await db.commit()
+    await audit(db, "member_revoked", actor_user_id=user.id, object_type="project_membership", object_id=project_id, detail={"user_id": target_user_id})
+    return None
