@@ -1,7 +1,7 @@
 from typing import Optional, List
 import redis.asyncio as aioredis
 import json
-from datetime import datetime
+from app.core.time import utcnow
 from fastapi import APIRouter, Depends, HTTPException
 from git import Repo
 from sqlalchemy import select
@@ -301,7 +301,7 @@ async def reject_job(
         prun = (await db.execute(select(PipelineRun).where(PipelineRun.id == job.pipeline_run_id))).scalar_one_or_none()
         if prun:
             prun.status = PipelineStatus.failed
-            prun.finished_at = datetime.utcnow()
+            prun.finished_at = utcnow()
     await db.commit()
     await audit(db, "job_rejected", actor_user_id=user.id, object_type="job_run", object_id=job.id)
     return {"id": job.id, "status": job.status}

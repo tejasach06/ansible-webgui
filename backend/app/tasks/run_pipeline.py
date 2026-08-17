@@ -1,4 +1,4 @@
-from datetime import datetime
+from app.core.time import utcnow
 import json
 import redis
 from sqlalchemy import select, and_
@@ -28,7 +28,7 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
 
         prun.status = PipelineStatus.running
         if not prun.started_at:
-            prun.started_at = datetime.utcnow()
+            prun.started_at = utcnow()
         db.commit()
 
         steps = db.execute(
@@ -41,7 +41,7 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
             # Check cancel flag
             if r.get(f"pipeline:{pipeline_run_id}:cancel") == b"1":
                 prun.status = PipelineStatus.canceled
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
 
@@ -59,7 +59,7 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
             tmpl = db.execute(select(JobTemplate).where(JobTemplate.id == step.template_id)).scalar_one_or_none()
             if not tmpl:
                 prun.status = PipelineStatus.failed
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
 
@@ -69,7 +69,7 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
             inventory = db.execute(select(Inventory).where(Inventory.id == effective_inventory_id)).scalar_one_or_none() if effective_inventory_id else None
             if not inventory or not inventory_visible_to_project(inventory, tmpl.project_id):
                 prun.status = PipelineStatus.failed
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
 
@@ -132,7 +132,7 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
                 continue
             elif term_status in ("canceled", "rejected"):
                 prun.status = PipelineStatus.canceled if term_status == "canceled" else PipelineStatus.failed
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
             else:
@@ -140,18 +140,18 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
                     continue
                 else:
                     prun.status = PipelineStatus.failed
-                    prun.finished_at = datetime.utcnow()
+                    prun.finished_at = utcnow()
                     db.commit()
                     return
 
         prun.status = PipelineStatus.successful
-        prun.finished_at = datetime.utcnow()
+        prun.finished_at = utcnow()
         db.commit()
 
     except Exception:
         if 'prun' in locals() and prun:
             prun.status = PipelineStatus.failed
-            prun.finished_at = datetime.utcnow()
+            prun.finished_at = utcnow()
             db.commit()
         raise
     finally:

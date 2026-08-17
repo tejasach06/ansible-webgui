@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.models import HostResultStatus, JobHostResult, JobPlay, JobTask
 
@@ -32,12 +32,13 @@ def parse_timestamp(value):
     if not value:
         return None
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     return None
 
 
