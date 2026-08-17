@@ -1,8 +1,19 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from app.api import auth, users, credentials, projects, playbooks, inventories, job_templates, jobs, pipelines, content, schedules, audit, notifications
 
-app = FastAPI(title="Ansible WebGUI API", docs_url="/api/docs", openapi_url="/api/openapi.json")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.db.seed import seed_roles_and_admin
+    from app.db.session import AsyncSessionLocal
+    from app.services.content import ensure_inventory_repo
+    await seed_roles_and_admin()
+    async with AsyncSessionLocal() as db:
+        await ensure_inventory_repo(db)
+    yield
+
+app = FastAPI(title="Ansible WebGUI API", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan)
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -30,15 +41,6 @@ async def generic_exception_handler(request: Request, exc: Exception):
         status_code=getattr(exc, "status_code", 500),
         content={"detail": {"code": code, "message": str(detail)}}
     )
-@app.on_event("startup")
-async def startup():
-    from app.db.seed import seed_roles_and_admin
-    from app.db.session import AsyncSessionLocal
-    from app.services.content import ensure_inventory_repo
-    await seed_roles_and_admin()
-    async with AsyncSessionLocal() as db:
-        await ensure_inventory_repo(db)
-
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
