@@ -18,6 +18,8 @@ RUN useradd -m -u 1000 runner && mkdir -p /data/content /data/artifacts /home/ru
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 RUN rm -f /usr/local/bin/uv && python -m pip install --no-cache-dir --upgrade pip==26.2.1
+RUN ansible-galaxy collection install ansible.posix:1.6.2 -p /usr/share/ansible/collections \
+    && chmod -R a+rX /usr/share/ansible/collections
 WORKDIR /app
 COPY backend /app/
 

@@ -1,6 +1,7 @@
 import enum
 from datetime import datetime
 from typing import Optional, List
+from app.core.time import utcnow
 from sqlalchemy import (
     String, Integer, SmallInteger, Boolean, DateTime, Enum, ForeignKey, UniqueConstraint, Table, Column, Text, LargeBinary, Index, func
 )
@@ -75,7 +76,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, nullable=False)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     roles: Mapped[List["Role"]] = relationship("Role", secondary=user_roles, lazy="joined")
 
@@ -229,7 +230,44 @@ class JobEvent(Base):
     task: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     stdout: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+class JobPlay(Base):
+    __tablename__ = "job_plays"
+    __table_args__ = (UniqueConstraint("job_run_id", "uuid"),)
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
+    uuid: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    counter: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class JobTask(Base):
+    __tablename__ = "job_tasks"
+    __table_args__ = (UniqueConstraint("job_run_id", "uuid"), Index("ix_job_tasks_job_run_id", "job_run_id"),)
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
+    play_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("job_plays.id", ondelete="CASCADE"), nullable=False)
+    uuid: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    counter: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class JobHostResult(Base):
+    __tablename__ = "job_host_results"
+    __table_args__ = (Index("ix_job_host_results_job_run_host", "job_run_id", "host"),)
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("job_tasks.id", ondelete="CASCADE"), nullable=False)
+    host: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[HostResultStatus] = mapped_column(Enum(HostResultStatus), nullable=False)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    counter: Mapped[int] = mapped_column(Integer, nullable=False)
+    ignore_errors: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    res: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 class JobPlay(Base):
     __tablename__ = "job_plays"
@@ -277,7 +315,7 @@ class Schedule(Base):
     timezone: Mapped[str] = mapped_column(String, default="UTC", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     redbeat_key: Mapped[str] = mapped_column(String, nullable=False)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_job_run_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="SET NULL"), nullable=True)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
 
@@ -301,7 +339,7 @@ class Commit(Base):
     author_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     files_changed: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
@@ -312,4 +350,4 @@ class AuditLog(Base):
     object_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     ip: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

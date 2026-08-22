@@ -37,7 +37,7 @@ async def init_project_repo(db: AsyncSession, project: Project, author_username:
         "host_key_checking = True\n"
         "inventory = inventories/\n"
         "roles_path = roles:galaxy_roles\n"
-        "collections_path = collections\n"
+        "collections_path = collections:/usr/share/ansible/collections\n"
         "retry_files_enabled = False\n"
         "callbacks_enabled = profile_tasks\n"
         "[ssh_connection]\n"
