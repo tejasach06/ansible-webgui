@@ -16,11 +16,6 @@ Run backend tests from the stack:
 podman compose exec api pytest -q
 ```
 
-Apply or create migrations:
-
-```sh
-podman compose exec api alembic upgrade head
-podman compose exec api alembic revision --autogenerate -m "add x"
-```
+The API creates all database tables from the SQLAlchemy models at startup. Schema changes during development require recreating the database (`podman compose down -v`).
 
 Top-level docs: [README](../README.md), [architecture](../docs/architecture.md), and [contributing](../CONTRIBUTING.md).

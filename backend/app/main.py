@@ -5,9 +5,10 @@ from app.api import auth, users, credentials, projects, playbooks, inventories, 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.db.session import AsyncSessionLocal, init_db
     from app.db.seed import seed_roles_and_admin
-    from app.db.session import AsyncSessionLocal
     from app.services.content import ensure_inventory_repo
+    await init_db()
     await seed_roles_and_admin()
     async with AsyncSessionLocal() as db:
         await ensure_inventory_repo(db)

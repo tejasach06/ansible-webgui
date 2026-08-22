@@ -12,3 +12,8 @@ SyncSessionLocal = sessionmaker(sync_engine)
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
+
+async def init_db() -> None:
+    from app.db.models import Base
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
