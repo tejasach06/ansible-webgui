@@ -133,7 +133,7 @@ export function ProjectsPage() {
       actions={can("project.create") && <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={openCreate}>Create project</Button>}
     />
     {(list.error || playbooks.error || del.error || updateEdit.error) && <ErrorBanner error={list.error || playbooks.error || del.error || updateEdit.error} />}
-    <DataTable<Project> rows={list.data ?? []} loading={list.isLoading} empty={<EmptyState>No projects yet. Create a project to sync content.</EmptyState>} columns={[
+    <DataTable<Project> rows={list.data?.filter(p => !p.is_inventory_repo) ?? []} loading={list.isLoading} empty={<EmptyState>No projects yet. Create a project to sync content.</EmptyState>} columns={[
       { key: "name", header: "Name", render: r => <Link className={`font-medium ${linkClass}`} to={`/projects/${r.id}`}>{r.name}</Link> },
       { key: "git_path", header: "Git path", render: r => r.git_path },
       { key: "default_branch", header: "Default branch", render: r => r.default_branch },
