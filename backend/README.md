@@ -18,4 +18,4 @@ podman compose exec api pytest -q
 
 The API creates all database tables from the SQLAlchemy models at startup. Schema changes during development require recreating the database (`podman compose down -v`).
 
-Top-level docs: [README](../README.md), [architecture](../docs/architecture.md), and [contributing](../CONTRIBUTING.md).
+Top-level docs: [README](../README.md), [configuration](../docs/configuration.md), [architecture](../docs/architecture.md), and [contributing](../CONTRIBUTING.md).

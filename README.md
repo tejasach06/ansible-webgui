@@ -8,11 +8,21 @@ Stack: FastAPI + Celery + PostgreSQL + Redis, React 18 + Vite, served behind ngi
 ## Quickstart
 
 ```bash
-cp .env.example .env      # then set SECRET_KEY, FERNET_KEY, POSTGRES_PASSWORD
+cp .env.example .env      # then set JWT_SECRET, FERNET_KEY, POSTGRES_PASSWORD
 podman compose up -d --build
+podman compose --profile test run --rm tests
 ```
 
 UI: http://localhost:8080 — API docs: http://localhost:8000/api/docs
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Configuration](docs/configuration.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Backend](backend/README.md)
+- [Frontend](frontend/README.md)
 
 ## Branches
 
