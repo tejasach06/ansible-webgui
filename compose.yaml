@@ -73,6 +73,22 @@ services:
     depends_on:
       - api
 
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: Containerfile.backend
+      target: tests
+    command: pytest -q
+    env_file: .env
+    volumes:
+      - ./backend:/app
+      - content:/data/content
+      - artifacts:/data/artifacts
+    depends_on:
+      - postgres
+      - redis
+
 volumes:
   pgdata:
   content:

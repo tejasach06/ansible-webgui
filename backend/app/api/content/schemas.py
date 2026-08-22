@@ -1,4 +1,3 @@
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -7,7 +6,7 @@ class SaveFileRequest(BaseModel):
     rel_path: str
     content: str
     message: str
-    base_sha: Optional[str] = None
+    base_sha: str | None = None
 
 
 class CreateRoleRequest(BaseModel):

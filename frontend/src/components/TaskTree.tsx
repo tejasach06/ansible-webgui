@@ -60,4 +60,3 @@ export function TaskTree({ data, onJump }: { data?: JobReport; onJump: (counter:
   );
 }
 
-export default TaskTree;

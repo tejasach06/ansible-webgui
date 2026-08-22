@@ -1,17 +1,19 @@
 import zoneinfo
-from typing import Optional
+
+from celery.schedules import crontab
+from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from croniter import croniter
 from redbeat import RedBeatSchedulerEntry
-from app.db.session import get_db
-from app.db.models import Schedule, JobTemplate, User
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_user
-from app.tasks.worker import celery_app
+from app.db.models import JobTemplate, Schedule, User
+from app.db.session import get_db
 from app.services.audit import audit
 from app.services.rbac_scope import assert_project_perm, visible_project_ids
+from app.tasks.worker import celery_app
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 
@@ -22,10 +24,10 @@ class ScheduleCreate(BaseModel):
     timezone: str = "UTC"
 
 class ScheduleUpdate(BaseModel):
-    name: Optional[str] = None
-    cron_expr: Optional[str] = None
-    timezone: Optional[str] = None
-    enabled: Optional[bool] = None
+    name: str | None = None
+    cron_expr: str | None = None
+    timezone: str | None = None
+    enabled: bool | None = None
 
 @router.get("")
 async def list_schedules(
@@ -59,7 +61,7 @@ async def create_schedule(
     try:
         zoneinfo.ZoneInfo(req.timezone)
     except Exception:
-        raise HTTPException(status_code=422, detail={"code": "bad_timezone", "message": "Invalid timezone"})
+        raise HTTPException(status_code=422, detail={"code": "bad_timezone", "message": "Invalid timezone"}) from None
 
     template = (await db.execute(select(JobTemplate).where(JobTemplate.id == req.template_id))).scalar_one_or_none()
     if not template:
@@ -81,12 +83,16 @@ async def create_schedule(
     await db.commit()
     await db.refresh(sched)
 
+    parts = req.cron_expr.split()
+    if len(parts) != 5:
+        raise HTTPException(status_code=422, detail={"code": "bad_cron", "message": "Invalid cron expression"})
+    m, h, dom, mon, dow = parts
     entry = RedBeatSchedulerEntry(
         name=redbeat_key,
         task="run_scheduled",
-        schedule=croniter(req.cron_expr),
+        schedule=crontab(minute=m, hour=h, day_of_month=dom, month_of_year=mon, day_of_week=dow),
         args=[sched.id],
-        app=celery_app
+        app=celery_app,
     )
     entry.save()
 
@@ -100,13 +106,16 @@ async def update_schedule(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    sched = (await db.execute(select(Schedule).where(Schedule.id == schedule_id))).scalar_one_or_none()
-    if not sched:
+    res = await db.execute(
+        select(Schedule, JobTemplate.project_id)
+        .join(JobTemplate, Schedule.template_id == JobTemplate.id)
+        .where(Schedule.id == schedule_id)
+    )
+    row = res.first()
+    if not row:
         raise HTTPException(status_code=404, detail={"code": "schedule_not_found", "message": "Schedule not found"})
-    template = (await db.execute(select(JobTemplate).where(JobTemplate.id == sched.template_id))).scalar_one_or_none()
-    if not template:
-        raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
-    await assert_project_perm(db, user, template.project_id, "schedule.write")
+    sched, project_id = row
+    await assert_project_perm(db, user, project_id, "schedule.write")
 
     if req.cron_expr and not croniter.is_valid(req.cron_expr):
         raise HTTPException(status_code=422, detail={"code": "bad_cron", "message": "Invalid cron expression"})
@@ -115,7 +124,7 @@ async def update_schedule(
         try:
             zoneinfo.ZoneInfo(req.timezone)
         except Exception:
-            raise HTTPException(status_code=422, detail={"code": "bad_timezone", "message": "Invalid timezone"})
+            raise HTTPException(status_code=422, detail={"code": "bad_timezone", "message": "Invalid timezone"}) from None
 
     for k, v in req.model_dump(exclude_unset=True).items():
         setattr(sched, k, v)
@@ -131,13 +140,16 @@ async def delete_schedule(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    sched = (await db.execute(select(Schedule).where(Schedule.id == schedule_id))).scalar_one_or_none()
-    if not sched:
+    res = await db.execute(
+        select(Schedule, JobTemplate.project_id)
+        .join(JobTemplate, Schedule.template_id == JobTemplate.id)
+        .where(Schedule.id == schedule_id)
+    )
+    row = res.first()
+    if not row:
         raise HTTPException(status_code=404, detail={"code": "schedule_not_found", "message": "Schedule not found"})
-    template = (await db.execute(select(JobTemplate).where(JobTemplate.id == sched.template_id))).scalar_one_or_none()
-    if not template:
-        raise HTTPException(status_code=404, detail={"code": "template_not_found", "message": "Template not found"})
-    await assert_project_perm(db, user, template.project_id, "schedule.write")
+    sched, project_id = row
+    await assert_project_perm(db, user, project_id, "schedule.write")
 
     try:
         entry = RedBeatSchedulerEntry.from_key(sched.redbeat_key, app=celery_app)

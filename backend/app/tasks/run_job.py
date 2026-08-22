@@ -1,16 +1,19 @@
-import os
 import json
+import os
 import shutil
 import tempfile
-import redis
+
 import ansible_runner
-from app.tasks.worker import celery_app
-from app.db.session import SyncSessionLocal
-from app.services.run_report import ReportBuilder
-from app.db.models import JobRun, JobStatus, JobEvent, Project, Playbook
-from app.tasks.job_workspace import export_inventory_snapshot, export_project_snapshot, materialize_credentials
-from app.services.credentials import decrypt_payload
+import redis
+
 from app.core.config import settings
+from app.core.time import utcnow
+from app.db.models import JobEvent, JobRun, JobStatus, Playbook, Project
+from app.db.session import SyncSessionLocal
+from app.services.credentials import decrypt_payload
+from app.services.run_report import ReportBuilder
+from app.tasks.job_workspace import export_inventory_snapshot, export_project_snapshot, materialize_credentials
+from app.tasks.worker import celery_app
 
 redis_client = redis.Redis.from_url(settings.REDIS_URL)
 
@@ -23,6 +26,7 @@ def run_job(job_run_id: int):
             return
         
         job.status = JobStatus.running
+        job.started_at = utcnow()
         db.commit()
 
         snapshot = job.params_snapshot
@@ -138,13 +142,13 @@ def run_job(job_run_id: int):
             job.stats = runner.stats or stats_from_event
             job.rc = runner.rc
             job.artifact_dir = artifact_dir
+            job.finished_at = utcnow()
             if cancel_callback():
                 job.status = JobStatus.canceled
             elif runner.status == "successful":
                 job.status = JobStatus.successful
             else:
                 job.status = JobStatus.failed
-
             db.commit()
             from app.tasks.notify import send_notification
             send_notification.delay("job_finished", {"event": "job_finished", "job_id": job.id, "status": job.status.value, "mode": job.mode.value, "template_id": job.template_id, "playbook_id": job.playbook_id, "rc": job.rc, "stats": job.stats, "url": None})

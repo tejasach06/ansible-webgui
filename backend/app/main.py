@@ -1,12 +1,29 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from app.api import auth, users, credentials, projects, playbooks, inventories, job_templates, jobs, pipelines, content, schedules, audit, notifications
+
+from app.api import (
+    audit,
+    auth,
+    content,
+    credentials,
+    inventories,
+    job_templates,
+    jobs,
+    notifications,
+    pipelines,
+    playbooks,
+    projects,
+    schedules,
+    users,
+)
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    from app.db.session import AsyncSessionLocal, init_db
+async def lifespan(_app: FastAPI):
     from app.db.seed import seed_roles_and_admin
+    from app.db.session import AsyncSessionLocal, init_db
     from app.services.content import ensure_inventory_repo
     await init_db()
     await seed_roles_and_admin()
@@ -31,7 +48,7 @@ app.include_router(audit.router)
 app.include_router(notifications.router)
 
 @app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception):
+async def generic_exception_handler(_request: Request, exc: Exception):
     if isinstance(exc, HTTPException):
         if isinstance(exc.detail, dict):
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

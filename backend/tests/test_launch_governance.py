@@ -6,8 +6,23 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.db.models import Inventory, InventoryFormat, JobTemplate, Playbook, Project, ProjectMembership, ProjectRole, Role, User
-from app.services.content import ensure_inventory_repo, get_inventory_repo_path, get_project_repo_path, init_project_repo
+from app.db.models import (
+    Inventory,
+    InventoryFormat,
+    JobTemplate,
+    Playbook,
+    Project,
+    ProjectMembership,
+    ProjectRole,
+    Role,
+    User,
+)
+from app.services.content import (
+    ensure_inventory_repo,
+    get_inventory_repo_path,
+    get_project_repo_path,
+    init_project_repo,
+)
 
 MUTATE = {"X-Requested-With": "XMLHttpRequest"}
 
@@ -37,7 +52,7 @@ async def _user(db, username: str, role_name: str = "user"):
     return user
 
 
-async def _stack(db, monkeypatch, tmp_path, name: str, ask_limit: bool = False):
+async def _stack(db, monkeypatch, tmp_path, name: str, ask_limit: bool = False, limit_pattern: str | None = None):
     monkeypatch.setattr(settings, "CONTENT_ROOT", str(tmp_path))
     project = Project(name=name, git_path=str(tmp_path / name))
     db.add(project)
@@ -68,6 +83,7 @@ async def _stack(db, monkeypatch, tmp_path, name: str, ask_limit: bool = False):
         inventory_id=inventory.id,
         requires_approval=True,
         ask_limit=ask_limit,
+        limit_pattern=limit_pattern,
     )
     db.add(template)
     await db.commit()
@@ -116,3 +132,17 @@ async def test_adhoc_launch_forbidden_for_non_admin(client, db, monkeypatch, tmp
 
     assert res.status_code == 403
     assert res.json()["detail"]["code"] == "adhoc_forbidden"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_template_default_limit_pattern_applied(client, db, monkeypatch, tmp_path):
+    _, _, _, template = await _stack(db, monkeypatch, tmp_path, f"launch-limit-{uuid4().hex}", ask_limit=False, limit_pattern="web")
+    await _login(client)
+
+    created = await client.post("/api/jobs", json={"template_id": template.id}, headers=MUTATE)
+    assert created.status_code == 200
+    job_id = created.json()["id"]
+
+    detail = await client.get(f"/api/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert detail.json()["params_snapshot"]["limit"] == "web"

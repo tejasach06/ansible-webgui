@@ -5,7 +5,7 @@ import { usePlaybooks } from "../api/playbooks";
 import { useTemplates } from "../api/templates";
 import type { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { InventoryFormat, JobMode, JobTemplate, SurveyField } from "../lib/types";
+import { parseExtra, type InventoryFormat, type JobMode, type JobTemplate, type SurveyField } from "../lib/types";
 import { Button } from "./Button";
 import { ErrorBanner } from "./ErrorBanner";
 import { Checkbox, NumberInput, Select, TextArea, TextInput } from "./Field";
@@ -16,11 +16,10 @@ const inventoryStarters: Record<InventoryFormat, string> = { yaml: buildInventor
 function freshNewInventory() { return { name: "", filename: "", format: "yaml" as InventoryFormat, content: inventoryStarters.yaml }; }
 export const init = { template_id: "", playbook_id: "", inventory_id: "", mode: "check" as JobMode, limit: "", tags: "", skip_tags: "", verbosity: 0, forks: 5, become: false, become_user: "", become_method: "", credential_ids: [] as number[], extra_vars: "{}", diff: false, survey_answers: {} as Record<string, unknown> };
 export type LaunchForm = typeof init;
-export function parseExtra(v: string): Record<string, unknown> | null { try { const parsed: unknown = JSON.parse(v); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null; } catch { return null; } }
 export function surveyComplete(form: LaunchForm, spec?: SurveyField[]) { return !(spec ?? []).some((f) => f.required && (form.survey_answers[f.var] === undefined || form.survey_answers[f.var] === "")); }
 export function buildLaunchBody(form: LaunchForm) { const extra_vars = parseExtra(form.extra_vars); if (!extra_vars) return null; return { template_id: form.template_id ? Number(form.template_id) : null, playbook_id: Number(form.playbook_id), inventory_id: form.inventory_id ? Number(form.inventory_id) : null, mode: form.mode, limit: form.limit || null, tags: form.tags || null, skip_tags: form.skip_tags || null, extra_vars, survey_answers: form.survey_answers, verbosity: Number(form.verbosity), forks: Number(form.forks), become: form.become, become_user: form.become_user || null, become_method: form.become_method || null, credential_ids: form.credential_ids, diff: form.diff }; }
 
-function formFromTemplate(form: LaunchForm, t: JobTemplate | undefined, id: string): LaunchForm {
+export function formFromTemplate(form: LaunchForm, t: JobTemplate | undefined, id: string): LaunchForm {
   return {
     ...form,
     template_id: id,
@@ -41,7 +40,7 @@ function formFromTemplate(form: LaunchForm, t: JobTemplate | undefined, id: stri
 
 function LockedHint({ show }: { show: boolean }) { return show ? <p className="-mt-2 text-xs text-zinc-500 dark:text-zinc-400">Locked by template</p> : null; }
 
-export function JobLaunchForm({ form, setForm, extraError, setExtraError, lockPlaybook = false, firstRef, onTemplateChange, onNewInventory }: { form: LaunchForm; setForm: Dispatch<SetStateAction<LaunchForm>>; extraError?: string; setExtraError?: Dispatch<SetStateAction<string>>; lockPlaybook?: boolean; firstRef?: Ref<HTMLSelectElement>; onTemplateChange?: (id: string) => void; onNewInventory?: () => void; }) {
+export function JobLaunchForm({ form, setForm, extraError, setExtraError, lockPlaybook = false, firstRef, onTemplateChange }: { form: LaunchForm; setForm: Dispatch<SetStateAction<LaunchForm>>; extraError?: string; setExtraError?: Dispatch<SetStateAction<string>>; lockPlaybook?: boolean; firstRef?: Ref<HTMLSelectElement>; onTemplateChange?: (id: string) => void; }) {
   const { canAny, canInventoryWrite, canInProject } = useAuth();
   const { toast } = useToast();
   const templates = useTemplates();
@@ -66,11 +65,11 @@ export function JobLaunchForm({ form, setForm, extraError, setExtraError, lockPl
     if (onTemplateChange) onTemplateChange(id);
     else setForm(formFromTemplate(form, t, id));
   };
-  const openNewInventory = () => { if (!canInventoryWrite) return; onNewInventory?.(); createInventory.reset(); setNewInventoryOpen(true); };
+  const openNewInventory = () => { if (!canInventoryWrite) return; createInventory.reset(); setNewInventoryOpen(true); };
   const setInventory = (id: string) => { if (id === "__new") { openNewInventory(); return; } setForm({ ...form, inventory_id: id }); };
   const setNewInventoryFormat = (format: InventoryFormat) => setNewInventory((current) => ({ ...current, format, content: current.content === inventoryStarters[current.format] ? inventoryStarters[format] : current.content }));
   const cancelNewInventory = () => { createInventory.reset(); setNewInventory(freshNewInventory()); setNewInventoryOpen(false); };
-  const createNewInventory = async () => { try { const created = await createInventory.mutateAsync({ name: newInventory.name, filename: newInventory.filename, format: newInventory.format, content: newInventory.content }); setForm((current) => ({ ...current, inventory_id: String(created.id) })); setNewInventory(freshNewInventory()); setNewInventoryOpen(false); toast("Inventory created"); } catch { /* ponytail: mutation state already feeds ErrorBanner; add custom handling only if React Query stops tracking mutateAsync errors. */ } };
+  const createNewInventory = async () => { try { const created = await createInventory.mutateAsync({ name: newInventory.name, filename: newInventory.filename, format: newInventory.format, content: newInventory.content }); setForm((current) => ({ ...current, inventory_id: String(created.id) })); setNewInventory(freshNewInventory()); setNewInventoryOpen(false); toast("Inventory created"); } catch { /* mutation state feeds ErrorBanner */ } };
   const answer = (key: string, value: unknown) => setForm({ ...form, survey_answers: { ...form.survey_answers, [key]: value } });
 
   return <div className="grid gap-3">

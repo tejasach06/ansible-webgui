@@ -1,32 +1,23 @@
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.db.session import get_db
-from app.db.models import Project, User
-from app.core.security import verify_password
+
 from app.core.auth import create_access_token, create_refresh_token, decode_token
-from app.core.rbac import get_user_permissions, get_project_permissions
-from app.db.models import ProjectMembership
 from app.core.config import settings
+from app.core.rbac import get_project_permissions, get_user_permissions
+from app.core.security import verify_password
+from app.db.models import Project, ProjectMembership, User
+from app.db.session import get_db
 from app.services.audit import audit
-from app.services.rbac_scope import has_inventory_write
+from app.services.rbac_scope import has_inventory_write, role_name
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
 class LoginRequest(BaseModel):
     username: str
     password: str
-
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    email: str
-    is_active: bool
-    roles: List[str]
-    perms: List[str]
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     token = request.cookies.get("access_token")
@@ -38,7 +29,7 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
             raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "Invalid token type"})
         user_id = payload.get("sub")
     except Exception:
-        raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "Invalid token"})
+        raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "Invalid token"}) from None
 
     user = (await db.execute(select(User).options(selectinload(User.roles)).where(User.id == int(user_id)))).unique().scalar_one_or_none()
     if not user or not user.is_active:
@@ -46,9 +37,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     return user
 
 def require_csrf(request: Request):
-    if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
-        if request.headers.get("X-Requested-With") != "XMLHttpRequest":
-            raise HTTPException(status_code=403, detail={"code": "csrf_missing", "message": "X-Requested-With header missing"})
+    if request.method in ["POST", "PUT", "PATCH", "DELETE"] and request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        raise HTTPException(status_code=403, detail={"code": "csrf_missing", "message": "X-Requested-With header missing"})
 
 def require(perm: str):
     async def dependency(request: Request, user: User = Depends(get_current_user)):
@@ -70,7 +60,7 @@ def require_project(perm: str, param: str = "project_id"):
         try:
             project_id = int(raw_pid)
         except ValueError:
-            raise HTTPException(status_code=400, detail={"code": "invalid_project_id", "message": "project_id must be integer"})
+            raise HTTPException(status_code=400, detail={"code": "invalid_project_id", "message": "project_id must be integer"}) from None
 
         project = (await db.execute(select(Project.id).where(Project.id == project_id))).scalar_one_or_none()
         if project is None:
@@ -89,7 +79,7 @@ def require_project(perm: str, param: str = "project_id"):
         membership = res.scalar_one_or_none()
         if not membership:
             raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Insufficient project permission"})
-        role_str = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
+        role_str = role_name(membership.role)
         proj_perms = get_project_permissions(role_str)
         if perm not in proj_perms:
             raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Insufficient project permission"})
@@ -147,7 +137,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
             raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "Invalid token type"})
         user_id = payload.get("sub")
     except Exception:
-        raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "Invalid refresh token"})
+        raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "Invalid refresh token"}) from None
 
     user = (await db.execute(select(User).where(User.id == int(user_id)))).unique().scalar_one_or_none()
     if not user or not user.is_active:
@@ -190,8 +180,8 @@ async def get_me(user: User = Depends(get_current_user), db: AsyncSession = Depe
     memberships = res.scalars().all()
     project_perms = {}
     for m in memberships:
-        role_str = m.role.value if hasattr(m.role, "value") else str(m.role)
-        project_perms[str(m.project_id)] = sorted(list(get_project_permissions(role_str)))
+        role_str = role_name(m.role)
+        project_perms[str(m.project_id)] = sorted(get_project_permissions(role_str))
     return {
         "id": user.id,
         "username": user.username,

@@ -1,16 +1,17 @@
 import re
-from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.db.session import get_db
-from app.db.models import Project, Playbook, JobRun, JobStatus, User, ProjectMembership, ProjectRole, Inventory
+
 from app.api.auth import require, require_project
-from app.services.rbac_scope import visible_project_ids, inventory_visible_to_project
-from app.services.audit import audit
-from app.services.content import init_project_repo, get_project_repo_path
 from app.core.config import settings
+from app.db.models import Inventory, JobRun, JobStatus, Playbook, Project, ProjectMembership, ProjectRole, User
+from app.db.session import get_db
+from app.services.audit import audit
+from app.services.content import get_project_repo_path, init_project_repo
+from app.services.rbac_scope import inventory_visible_to_project, role_name, visible_project_ids
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -18,9 +19,9 @@ class ProjectCreate(BaseModel):
     name: str
 
 class ProjectUpdate(BaseModel):
-    name: Optional[str] = None
-    default_branch: Optional[str] = None
-    default_inventory_id: Optional[int] = None
+    name: str | None = None
+    default_branch: str | None = None
+    default_inventory_id: int | None = None
 
 class MemberRoleUpdate(BaseModel):
     role: ProjectRole
@@ -54,7 +55,7 @@ async def list_projects(
 @router.get("/{project_id}")
 async def get_project(
     project_id: int,
-    user: User = Depends(require_project("read")),
+    _user: User = Depends(require_project("read")),
     db: AsyncSession = Depends(get_db)
 ):
     p = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
@@ -120,7 +121,7 @@ async def update_project(
             if old.exists():
                 old.rename(new)
         except OSError as exc:
-            raise HTTPException(status_code=500, detail={"code": "rename_failed", "message": str(exc)})
+            raise HTTPException(status_code=500, detail={"code": "rename_failed", "message": str(exc)}) from exc
         p.name = req.name
         p.git_path = str(new)
     if req.default_branch is not None:
@@ -168,7 +169,7 @@ async def delete_project(
 @router.get("/{project_id}/members")
 async def list_members(
     project_id: int,
-    user: User = Depends(require_project("read")),
+    _user: User = Depends(require_project("read")),
     db: AsyncSession = Depends(get_db)
 ):
     res = await db.execute(
@@ -181,7 +182,7 @@ async def list_members(
         {
             "user_id": m.user_id,
             "username": uname,
-            "role": m.role.value if hasattr(m.role, "value") else str(m.role),
+            "role": role_name(m.role),
         }
         for m, uname in rows
     ]
@@ -212,11 +213,11 @@ async def upsert_member(
         db.add(membership)
 
     await db.commit()
-    await audit(db, "member_granted", actor_user_id=user.id, object_type="project_membership", object_id=project_id, detail={"user_id": target_user_id, "role": req.role.value if hasattr(req.role, "value") else str(req.role)})
+    await audit(db, "member_granted", actor_user_id=user.id, object_type="project_membership", object_id=project_id, detail={"user_id": target_user_id, "role": role_name(req.role)})
     return {
         "user_id": target_user_id,
         "username": target_user.username,
-        "role": req.role.value if hasattr(req.role, "value") else str(req.role),
+        "role": role_name(req.role),
     }
 
 @router.delete("/{project_id}/members/{target_user_id}", status_code=204)
@@ -236,7 +237,7 @@ async def delete_member(
     if not membership:
         raise HTTPException(status_code=404, detail={"code": "member_not_found", "message": "Membership not found"})
 
-    role_str = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
+    role_str = role_name(membership.role)
     if role_str == "owner":
         owner_count = (
             await db.execute(
@@ -252,4 +253,4 @@ async def delete_member(
     await db.delete(membership)
     await db.commit()
     await audit(db, "member_revoked", actor_user_id=user.id, object_type="project_membership", object_id=project_id, detail={"user_id": target_user_id})
-    return None
+    return

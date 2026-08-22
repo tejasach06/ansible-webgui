@@ -1,7 +1,8 @@
 import pytest
 from sqlalchemy import select
+
 from app.core.config import settings
-from app.db.models import Credential, CredentialKind, Playbook, Project, User
+from app.db.models import Credential, Playbook
 from app.services.content import get_project_repo_path
 from app.services.credentials import decrypt_payload
 

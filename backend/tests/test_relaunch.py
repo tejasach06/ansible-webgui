@@ -1,7 +1,7 @@
 import pytest
+from test_content_api import login
 
 from app.db.models import JobMode, JobRun, JobStatus
-from test_content_api import login
 
 
 @pytest.mark.asyncio(loop_scope="session")

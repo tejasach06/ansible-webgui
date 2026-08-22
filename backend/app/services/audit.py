@@ -1,15 +1,17 @@
-from typing import Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models import AuditLog
+
 
 async def audit(
     db: AsyncSession,
     action: str,
-    actor_user_id: Optional[int] = None,
-    object_type: Optional[str] = None,
-    object_id: Optional[str] = None,
-    detail: Optional[dict] = None,
-    ip: Optional[str] = None
+    actor_user_id: int | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    detail: dict | None = None,
+    ip: str | None = None
 ):
     entry = AuditLog(
         actor_user_id=actor_user_id,

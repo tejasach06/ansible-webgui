@@ -1,15 +1,16 @@
-from typing import Optional
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import or_, select
-from app.db.session import get_db
-from app.db.models import Playbook, Project, User
-from app.api.auth import get_current_user, require_csrf
-from app.services.content import commit_file, get_project_repo_path, validate_safe_path
-from app.services.audit import audit
-from app.services.rbac_scope import assert_project_perm, visible_project_ids
 from git import Repo
+from pydantic import BaseModel
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.auth import get_current_user, require_csrf
+from app.db.models import Playbook, Project, User
+from app.db.session import get_db
+from app.services.audit import audit
+from app.services.content import commit_file, get_project_repo_path, validate_safe_path
+from app.services.rbac_scope import assert_project_perm, visible_project_ids
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
 
@@ -17,17 +18,17 @@ class PlaybookRegister(BaseModel):
     project_id: int
     rel_path: str
     name: str
-    content: Optional[str] = None
-    message: Optional[str] = None
+    content: str | None = None
+    message: str | None = None
 
 class PlaybookUpdate(BaseModel):
-    name: Optional[str] = None
-    rel_path: Optional[str] = None
+    name: str | None = None
+    rel_path: str | None = None
 
 class PlaybookFileSave(BaseModel):
     content: str
     message: str
-    base_sha: Optional[str] = None
+    base_sha: str | None = None
 
 async def _load_playbook(db: AsyncSession, playbook_id: int) -> Playbook:
     pb = (await db.execute(select(Playbook).where(Playbook.id == playbook_id))).scalar_one_or_none()
@@ -40,7 +41,7 @@ def _playbook_response(pb: Playbook):
 
 @router.get("")
 async def list_playbooks(
-    project_id: Optional[int] = None,
+    project_id: int | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -72,7 +73,7 @@ async def register_playbook(
     try:
         file_path = validate_safe_path(repo_path, req.rel_path)
     except ValueError:
-        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"}) from None
 
     if req.content is not None and not req.rel_path.endswith((".yml", ".yaml")):
         raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Playbook file must end in .yml or .yaml"})
@@ -107,10 +108,11 @@ async def get_playbook_file(
     try:
         file_path = validate_safe_path(repo_path, pb.rel_path)
     except ValueError:
-        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"}) from None
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
-    return {"id": pb.id, "rel_path": pb.rel_path, "content": file_path.read_text(), "sha": Repo(repo_path).head.commit.hexsha}
+    sha = await anyio.to_thread.run_sync(lambda: Repo(repo_path).head.commit.hexsha)
+    return {"id": pb.id, "rel_path": pb.rel_path, "content": file_path.read_text(), "sha": sha}
 
 @router.post("/{playbook_id}/file")
 async def save_playbook_file(
@@ -128,7 +130,7 @@ async def save_playbook_file(
     try:
         file_path = validate_safe_path(repo_path, pb.rel_path)
     except ValueError:
-        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"}) from None
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
     sha = await commit_file(db, project, pb.rel_path, req.content, req.message or f"Update playbook {pb.name}", req.base_sha, user, lint=True)
@@ -152,7 +154,7 @@ async def update_playbook(
         try:
             file_path = validate_safe_path(repo_path, req.rel_path)
         except ValueError:
-            raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+            raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"}) from None
         if not file_path.is_file():
             raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "Playbook file not found in git repo"})
         duplicate = (await db.execute(select(Playbook).where(Playbook.project_id == pb.project_id, Playbook.rel_path == req.rel_path, Playbook.id != playbook_id))).scalar_one_or_none()

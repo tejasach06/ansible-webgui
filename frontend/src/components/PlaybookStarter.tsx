@@ -1,4 +1,4 @@
-export function playbookStarter(name: string) {
+function playbookStarter(name: string) {
   return `---
 - name: ${name}
   hosts: all
@@ -12,7 +12,7 @@ export function playbookStarter(name: string) {
 
 export const slugPath = (name: string) => `playbooks/${name.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}.yml`;
 
-export interface Starter { id: string; label: string; description: string; build(name: string): string }
+interface Starter { id: string; label: string; description: string; build(name: string): string }
 
 export const PLAYBOOK_STARTERS: Starter[] = [
   { id: "ping", label: "Ping check", description: "Verify connectivity to every host.", build: playbookStarter },

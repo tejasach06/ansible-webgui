@@ -1,4 +1,5 @@
 from uuid import uuid4
+
 import pytest
 from sqlalchemy import select
 
@@ -15,8 +16,6 @@ from app.db.models import (
     JobTemplate,
     Playbook,
     Project,
-    ProjectMembership,
-    ProjectRole,
     Role,
     User,
 )
