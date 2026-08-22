@@ -41,6 +41,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
         status_code=getattr(exc, "status_code", 500),
         content={"detail": {"code": code, "message": str(detail)}}
     )
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}

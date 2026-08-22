@@ -1,5 +1,4 @@
-from datetime import timedelta
-from app.core.time import utcnow
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -36,7 +35,7 @@ async def list_jobs(
 async def job_summary(user: User = Depends(require("read")), db: AsyncSession = Depends(get_db)):
     pending = (await db.execute(select(JobRun).where(JobRun.status == JobStatus.pending_approval).order_by(JobRun.created_at.asc()).limit(20))).scalars().all()
     running = (await db.execute(select(func.count(JobRun.id)).where(JobRun.status.in_([JobStatus.running, JobStatus.queued])))).scalar_one()
-    since = utcnow() - timedelta(days=7)
+    since = datetime.utcnow() - timedelta(days=7)
     grouped = (await db.execute(select(JobRun.status, func.count(JobRun.id)).where(JobRun.created_at >= since).group_by(JobRun.status))).all()
     recent = (await db.execute(select(JobRun).order_by(JobRun.created_at.desc()).limit(10))).scalars().all()
     return {

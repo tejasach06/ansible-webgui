@@ -99,7 +99,7 @@ class ProjectMembership(Base):
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[ProjectRole] = mapped_column(Enum(ProjectRole), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 class Inventory(Base):
     __tablename__ = "inventories"
@@ -169,7 +169,7 @@ class Pipeline(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 class PipelineStep(Base):
     __tablename__ = "pipeline_steps"
@@ -190,9 +190,9 @@ class PipelineRun(Base):
     current_position: Mapped[int] = mapped_column(SmallInteger, default=0, nullable=False)
     params_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     celery_task_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class JobRun(Base):
     __tablename__ = "job_runs"
@@ -212,9 +212,9 @@ class JobRun(Base):
     artifact_dir: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     stats: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     params_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     survey_secrets_enc: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
     relaunch_of_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="SET NULL"), nullable=True)
 
@@ -255,6 +255,43 @@ class JobTask(Base):
     counter: Mapped[int] = mapped_column(Integer, nullable=False)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class JobHostResult(Base):
+    __tablename__ = "job_host_results"
+    __table_args__ = (Index("ix_job_host_results_job_run_host", "job_run_id", "host"),)
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("job_tasks.id", ondelete="CASCADE"), nullable=False)
+    host: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[HostResultStatus] = mapped_column(Enum(HostResultStatus), nullable=False)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    counter: Mapped[int] = mapped_column(Integer, nullable=False)
+    ignore_errors: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    res: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+class JobPlay(Base):
+    __tablename__ = "job_plays"
+    __table_args__ = (UniqueConstraint("job_run_id", "uuid"),)
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
+    uuid: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    counter: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+class JobTask(Base):
+    __tablename__ = "job_tasks"
+    __table_args__ = (UniqueConstraint("job_run_id", "uuid"), Index("ix_job_tasks_job_run_id", "job_run_id"),)
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
+    play_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("job_plays.id", ondelete="CASCADE"), nullable=False)
+    uuid: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    counter: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class JobHostResult(Base):
     __tablename__ = "job_host_results"
