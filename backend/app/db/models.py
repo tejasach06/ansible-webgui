@@ -269,43 +269,6 @@ class JobHostResult(Base):
     ignore_errors: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     res: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
-class JobPlay(Base):
-    __tablename__ = "job_plays"
-    __table_args__ = (UniqueConstraint("job_run_id", "uuid"),)
-    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
-    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
-    uuid: Mapped[str] = mapped_column(String, nullable=False)
-    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    counter: Mapped[int] = mapped_column(Integer, nullable=False)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-class JobTask(Base):
-    __tablename__ = "job_tasks"
-    __table_args__ = (UniqueConstraint("job_run_id", "uuid"), Index("ix_job_tasks_job_run_id", "job_run_id"),)
-    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
-    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
-    play_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("job_plays.id", ondelete="CASCADE"), nullable=False)
-    uuid: Mapped[str] = mapped_column(String, nullable=False)
-    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    action: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    counter: Mapped[int] = mapped_column(Integer, nullable=False)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-class JobHostResult(Base):
-    __tablename__ = "job_host_results"
-    __table_args__ = (Index("ix_job_host_results_job_run_host", "job_run_id", "host"),)
-    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
-    job_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("job_runs.id", ondelete="CASCADE"), nullable=False)
-    task_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("job_tasks.id", ondelete="CASCADE"), nullable=False)
-    host: Mapped[str] = mapped_column(String, nullable=False)
-    status: Mapped[HostResultStatus] = mapped_column(Enum(HostResultStatus), nullable=False)
-    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    counter: Mapped[int] = mapped_column(Integer, nullable=False)
-    ignore_errors: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    res: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-
 class Schedule(Base):
     __tablename__ = "schedules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
