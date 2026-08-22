@@ -107,7 +107,7 @@ export function CredentialsPage() {
           onChange={(e) => setSelectedProjectId(e.target.value)}
         >
           <option value="">All projects</option>
-          {projects.data?.map((p) => (
+          {projects.data?.filter((p) => !p.is_inventory_repo).map((p) => (
             <option key={p.id} value={String(p.id)}>
               {p.name}
             </option>
@@ -184,7 +184,7 @@ export function CredentialsPage() {
             onChange={(e) => setForm({ ...form, project_id: e.target.value })}
           >
             <option value="">Select a project...</option>
-            {projects.data?.map((p) => (
+            {projects.data?.filter((p) => !p.is_inventory_repo).map((p) => (
               <option key={p.id} value={String(p.id)}>
                 {p.name}
               </option>
