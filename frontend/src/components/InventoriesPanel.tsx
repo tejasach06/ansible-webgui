@@ -15,10 +15,11 @@ import { TextInput, Select, TextArea } from "./Field";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyState } from "./EmptyState";
 import { InventoryHostsWizard, buildInventory } from "./InventoryHostsWizard";
+import { playbookEditorOptions } from "./PlaybookStarter";
 import type { ApiError } from "../lib/api";
 import type { Inventory, InventoryFormat } from "../lib/types";
 
-export function InventoriesPanel({ projectId, autoOpenCreate, onAutoOpenHandled }: { projectId?: number; autoOpenCreate?: boolean; onAutoOpenHandled?: () => void }) {
+export function InventoriesPanel({ projectId }: { projectId?: number }) {
   const { canInventoryWrite, canInProject } = useAuth();
   const { toast } = useToast();
   const { effectiveTheme } = useTheme();
@@ -60,7 +61,6 @@ export function InventoriesPanel({ projectId, autoOpenCreate, onAutoOpenHandled 
     setScope(projectId ? String(projectId) : "");
     setOpen(true);
   };
-  useEffect(() => { if (autoOpenCreate) { openCreate(); onAutoOpenHandled?.(); } }, [autoOpenCreate]);
 
   const closeEdit = () => {
     setEdit(undefined);
@@ -326,18 +326,7 @@ export function InventoriesPanel({ projectId, autoOpenCreate, onAutoOpenHandled 
               theme={effectiveTheme === "dark" ? "vs-dark" : "light"}
               value={content}
               onChange={v => setContent(v ?? "")}
-              options={{
-                readOnly: !canInventoryWrite,
-                minimap: { enabled: false },
-                wordWrap: "off",
-                lineNumbers: "on",
-                renderLineHighlight: "all",
-                stickyScroll: { enabled: true },
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 2,
-                insertSpaces: true,
-              }}
+              options={playbookEditorOptions(!canInventoryWrite)}
             />
           </div>
           <div className="grid shrink-0 gap-3">

@@ -147,4 +147,3 @@ export function PipelinesPanel({ projectId }: { projectId: number }) {
   );
 }
 
-export default PipelinesPanel;

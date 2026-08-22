@@ -1,6 +1,7 @@
-from typing import Tuple, Dict, Any, Set, Optional
-from app.db.models import JobTemplate, JobMode
+from typing import Any
+
 from app.api.jobs.schemas import JobRequest
+from app.db.models import JobMode, JobTemplate
 
 ASKABLE = {
     "limit": "ask_limit",
@@ -14,7 +15,7 @@ ASKABLE = {
     "mode": "ask_mode",
 }
 
-def resolve_launch(template: Optional[JobTemplate], req: JobRequest, survey_vars: Set[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def resolve_launch(template: JobTemplate | None, req: JobRequest, survey_vars: set[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     if template is None:
         effective = {
             "playbook_id": req.playbook_id,
@@ -34,13 +35,13 @@ def resolve_launch(template: Optional[JobTemplate], req: JobRequest, survey_vars
         }
         return effective, {}
 
-    effective: Dict[str, Any] = {}
-    overrides: Dict[str, Any] = {}
+    effective: dict[str, Any] = {}
+    overrides: dict[str, Any] = {}
     unallowed: list = []
 
     # Simple scalar field checks
     scalar_fields = [
-        ("limit", req.limit, getattr(template, "limit", None)),
+        ("limit", req.limit, getattr(template, "limit_pattern", None)),
         ("tags", req.tags, getattr(template, "tags", None)),
         ("skip_tags", req.skip_tags, getattr(template, "skip_tags", None)),
         ("verbosity", req.verbosity, getattr(template, "verbosity", 0)),
@@ -83,7 +84,7 @@ def resolve_launch(template: Optional[JobTemplate], req: JobRequest, survey_vars
         if not getattr(template, "ask_credentials", False):
             unallowed.append("credential_ids")
         else:
-            overrides["credential_ids"] = {"template": sorted(list(tpl_creds)), "request": sorted(list(req_creds))}
+            overrides["credential_ids"] = {"template": sorted(tpl_creds), "request": sorted(req_creds)}
         effective["credential_ids"] = list(req_creds)
 
     # Extra vars comparison (keys produced by survey do not count)
@@ -106,9 +107,9 @@ def resolve_launch(template: Optional[JobTemplate], req: JobRequest, survey_vars
     # Other inherited defaults
     effective["playbook_id"] = req.playbook_id or template.playbook_id
     effective["forks"] = req.forks if req.forks is not None else getattr(template, "forks", 5)
-    effective["become"] = req.become if req.become is not None else getattr(template, "become", False)
-    effective["become_user"] = req.become_user if req.become_user is not None else getattr(template, "become_user", None)
-    effective["become_method"] = req.become_method if req.become_method is not None else getattr(template, "become_method", None)
+    effective["become"] = req.become or False
+    effective["become_user"] = req.become_user
+    effective["become_method"] = req.become_method
 
     if unallowed:
         raise ValueError(f"override_not_allowed:{','.join(sorted(unallowed))}")

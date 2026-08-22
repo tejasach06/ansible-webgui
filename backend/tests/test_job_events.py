@@ -1,5 +1,6 @@
-from app.services.run_report import ReportBuilder
 from app.db.models import HostResultStatus
+from app.services.run_report import ReportBuilder
+
 
 def rows():
     return [

@@ -1,12 +1,17 @@
+import json
+import os
 import pathlib
 import subprocess
-from typing import Optional
+
+import anyio
 from fastapi import HTTPException
-from git import Repo, Actor
-from sqlalchemy.ext.asyncio import AsyncSession
+from git import Actor, Repo
 from sqlalchemy import select
-from app.db.models import Project, Commit
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
+from app.db.models import Commit, Project
+
 
 def get_project_repo_path(project_name: str) -> pathlib.Path:
     path = pathlib.Path(settings.CONTENT_ROOT) / project_name
@@ -70,26 +75,28 @@ async def commit_file(
     rel_path: str,
     content: str,
     message: str,
-    base_sha: Optional[str],
+    base_sha: str | None,
     user,
     lint: bool = True,
+    verify_inventory: bool = False,
 ) -> str:
     """Write, lint-gate, commit and record rel_path in project's repo. Returns commit sha."""
     repo_path = get_project_repo_path(project.name)
     try:
         file_path = validate_safe_path(repo_path, rel_path)
     except ValueError:
-        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"}) from None
 
     repo = Repo(repo_path)
-    if base_sha and repo.head.commit.hexsha != base_sha:
+    head_sha = await anyio.to_thread.run_sync(lambda: repo.head.commit.hexsha)
+    if base_sha and head_sha != base_sha:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "stale_write",
                 "message": "File modified since last read",
                 "current_content": file_path.read_text() if file_path.exists() else "",
-                "current_sha": repo.head.commit.hexsha,
+                "current_sha": head_sha,
             },
         )
 
@@ -98,17 +105,25 @@ async def commit_file(
     file_path.write_text(content)
 
     if lint:
-        res = subprocess.run(["ansible-lint", str(file_path)], capture_output=True, text=True, cwd=repo_path)
+        res = await anyio.to_thread.run_sync(lambda: subprocess.run(["ansible-lint", str(file_path)], capture_output=True, text=True, cwd=repo_path))
         if res.returncode != 0 and "syntax-check" in res.stderr:
             if orig_content is not None:
                 file_path.write_text(orig_content)
             else:
                 file_path.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail={"code": "lint_error", "message": "Ansible lint failed", "stderr": res.stderr})
-
-    repo.index.add([rel_path])
+    if verify_inventory:
+        try:
+            verify_inventory_file(file_path)
+        except HTTPException:
+            if orig_content is not None:
+                file_path.write_text(orig_content)
+            else:
+                file_path.unlink(missing_ok=True)
+            raise
+    await anyio.to_thread.run_sync(repo.index.add, [rel_path])
     actor = Actor(user.username, user.email)
-    commit = repo.index.commit(message, author=actor, committer=actor)
+    commit = await anyio.to_thread.run_sync(lambda: repo.index.commit(message, author=actor, committer=actor))
     db.add(Commit(project_id=project.id, sha=commit.hexsha, author_user_id=user.id, message=message, files_changed=[rel_path]))
     await db.commit()
     return commit.hexsha
@@ -126,3 +141,40 @@ async def ensure_inventory_repo(db: AsyncSession) -> Project:
         await init_project_repo(db, project, "system", "system@local")
 
     return project
+
+INVENTORY_PLUGIN_ALLOWLIST = "yaml,ini,host_list"
+
+def verify_inventory_file(file_path: pathlib.Path) -> dict:
+    """Run ansible-inventory --list against file_path. Returns parsed JSON, or raises 422 inventory_invalid."""
+    try:
+        res = subprocess.run(
+            ["ansible-inventory", "-i", str(file_path), "--list"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=file_path.parent,
+            env={
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "ANSIBLE_INVENTORY_ENABLED": INVENTORY_PLUGIN_ALLOWLIST,
+                "ANSIBLE_INVENTORY_ANY_UNPARSED_IS_FAILED": "True",
+            },
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "inventory_invalid", "message": "Inventory could not be parsed", "stderr": "ansible-inventory timed out after 15s"},
+        ) from None
+
+    if res.returncode != 0:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "inventory_invalid", "message": "Inventory could not be parsed", "stderr": res.stderr[:4000]},
+        )
+
+    try:
+        return json.loads(res.stdout)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "inventory_invalid", "message": "Inventory could not be parsed", "stderr": res.stderr[:4000] or "Failed to decode ansible-inventory output as JSON"},
+        ) from None

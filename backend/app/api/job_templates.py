@@ -1,21 +1,23 @@
-from typing import Optional, List
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.db.session import get_db
-from app.db.models import Credential, JobTemplate, Schedule, User, Inventory
+
 from app.api.auth import get_current_user
-from app.services.rbac_scope import assert_project_perm, visible_project_ids, inventory_visible_to_project
-from app.services.surveys import validate_survey_spec
+from app.db.models import Credential, Inventory, JobTemplate, Schedule, User
+from app.db.session import get_db
 from app.services.audit import audit
+from app.services.rbac_scope import assert_project_perm, inventory_visible_to_project, visible_project_ids
+from app.services.surveys import validate_survey_spec
+
 
 def survey_error(code: str) -> HTTPException:
     return HTTPException(status_code=422, detail={"code": code, "message": code})
 
 router = APIRouter(prefix="/api/job_templates", tags=["job_templates"])
 
-async def _reject_credential_user_conflict(db: AsyncSession, credential_ids: List[int]) -> None:
+async def _reject_credential_user_conflict(db: AsyncSession, credential_ids: list[int]) -> None:
     if credential_ids:
         rows = (await db.execute(select(Credential.name, Credential.username).where(Credential.id.in_(credential_ids), Credential.username.isnot(None)))).all()
         if len({username for _, username in rows}) > 1:
@@ -25,16 +27,16 @@ async def _reject_credential_user_conflict(db: AsyncSession, credential_ids: Lis
 class JobTemplateCreate(BaseModel):
     project_id: int
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     playbook_id: int
-    inventory_id: Optional[int] = None
-    limit_pattern: Optional[str] = None
-    tags: Optional[str] = None
-    skip_tags: Optional[str] = None
+    inventory_id: int | None = None
+    limit_pattern: str | None = None
+    tags: str | None = None
+    skip_tags: str | None = None
     extra_vars: dict = {}
     verbosity: int = 0
     forks: int = 5
-    credential_ids: List[int] = []
+    credential_ids: list[int] = []
     requires_approval: bool = True
     diff_mode: bool = False
     survey_spec: list = []
@@ -49,32 +51,32 @@ class JobTemplateCreate(BaseModel):
     ask_mode: bool = False
 
 class JobTemplateUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    playbook_id: Optional[int] = None
-    inventory_id: Optional[int] = None
-    limit_pattern: Optional[str] = None
-    tags: Optional[str] = None
-    skip_tags: Optional[str] = None
-    extra_vars: Optional[dict] = None
-    verbosity: Optional[int] = None
-    forks: Optional[int] = None
-    credential_ids: Optional[List[int]] = None
-    requires_approval: Optional[bool] = None
-    diff_mode: Optional[bool] = None
-    survey_spec: Optional[list] = None
-    ask_limit: Optional[bool] = None
-    ask_tags: Optional[bool] = None
-    ask_skip_tags: Optional[bool] = None
-    ask_extra_vars: Optional[bool] = None
-    ask_verbosity: Optional[bool] = None
-    ask_diff: Optional[bool] = None
-    ask_credentials: Optional[bool] = None
-    ask_inventory: Optional[bool] = None
-    ask_mode: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    playbook_id: int | None = None
+    inventory_id: int | None = None
+    limit_pattern: str | None = None
+    tags: str | None = None
+    skip_tags: str | None = None
+    extra_vars: dict | None = None
+    verbosity: int | None = None
+    forks: int | None = None
+    credential_ids: list[int] | None = None
+    requires_approval: bool | None = None
+    diff_mode: bool | None = None
+    survey_spec: list | None = None
+    ask_limit: bool | None = None
+    ask_tags: bool | None = None
+    ask_skip_tags: bool | None = None
+    ask_extra_vars: bool | None = None
+    ask_verbosity: bool | None = None
+    ask_diff: bool | None = None
+    ask_credentials: bool | None = None
+    ask_inventory: bool | None = None
+    ask_mode: bool | None = None
 @router.get("")
 async def list_templates(
-    project_id: Optional[int] = None,
+    project_id: int | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -130,7 +132,7 @@ async def create_template(
     try:
         validate_survey_spec(req.survey_spec)
     except ValueError as e:
-        raise survey_error(str(e))
+        raise survey_error(str(e)) from None
     t = JobTemplate(**req.model_dump())
     db.add(t)
     await db.commit()
@@ -165,7 +167,7 @@ async def update_template(
         try:
             validate_survey_spec(data["survey_spec"])
         except ValueError as e:
-            raise survey_error(str(e))
+            raise survey_error(str(e)) from None
     for k, v in data.items():
         setattr(t, k, v)
     await db.commit()

@@ -1,13 +1,14 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.db.session import get_db
-from app.db.models import User, Role, JobRun
-from app.core.security import hash_password
-from app.api.auth import require
 from sqlalchemy.orm import selectinload
+
+from app.api.auth import require
+from app.core.security import hash_password
+from app.db.models import JobRun, Role, User
+from app.db.session import get_db
 from app.services.audit import audit
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -16,12 +17,12 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
-    roles: List[str]
+    roles: list[str]
 
 class UserUpdate(BaseModel):
-    email: Optional[str] = None
-    is_active: Optional[bool] = None
-    roles: Optional[List[str]] = None
+    email: str | None = None
+    is_active: bool | None = None
+    roles: list[str] | None = None
 
 class PasswordUpdate(BaseModel):
     password: str
@@ -30,7 +31,7 @@ class PasswordUpdate(BaseModel):
 async def list_users(
     limit: int = 50,
     offset: int = 0,
-    user: User = Depends(require("user.manage")),
+    _user: User = Depends(require("user.manage")),
     db: AsyncSession = Depends(get_db)
 ):
     total = (await db.execute(select(func.count(User.id)))).scalar_one()
@@ -52,7 +53,6 @@ async def list_users(
 @router.post("")
 async def create_user(
     req: UserCreate,
-    request: Request,
     user: User = Depends(require("user.manage")),
     db: AsyncSession = Depends(get_db)
 ):
@@ -85,7 +85,6 @@ async def create_user(
 async def update_user(
     user_id: int,
     req: UserUpdate,
-    request: Request,
     user: User = Depends(require("user.manage")),
     db: AsyncSession = Depends(get_db)
 ):
@@ -121,7 +120,7 @@ async def update_user(
 async def update_password(
     user_id: int,
     req: PasswordUpdate,
-    user: User = Depends(require("user.manage")),
+    _user: User = Depends(require("user.manage")),
     db: AsyncSession = Depends(get_db)
 ):
     target = (await db.execute(select(User).where(User.id == user_id))).unique().scalar_one_or_none()

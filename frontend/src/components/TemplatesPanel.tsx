@@ -5,6 +5,7 @@ import { useProjects } from "../api/projects";
 import { usePlaybooks } from "../api/playbooks";
 import { useInventories } from "../api/inventories";
 import { useCredentials } from "../api/credentials";
+import { parseExtra, type Credential, type JobTemplate, type SurveyField } from "../lib/types";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
 import { Section } from "./Section";
@@ -12,7 +13,6 @@ import { Drawer } from "./Drawer";
 import { DataTable } from "./DataTable";
 import { TextArea, TextInput, Checkbox, Select, NumberInput } from "./Field";
 import { ErrorBanner } from "./ErrorBanner";
-import type { JobTemplate, SurveyField } from "../lib/types";
 
 const init = {
   name: "",
@@ -41,14 +41,6 @@ const init = {
   ask_mode: false,
 };
 
-function parseExtra(v: string) {
-  try {
-    const parsed = JSON.parse(v);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 export function TemplatesPanel({ projectId }: { projectId?: number }) {
   const { toast } = useToast();
@@ -84,15 +76,15 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
         playbook_id: String(editing.playbook_id),
         inventory_id: String(editing.inventory_id),
         extra_vars: JSON.stringify(editing.extra_vars || {}, null, 2),
-        ask_limit: editing.ask_limit ?? false,
-        ask_tags: editing.ask_tags ?? false,
-        ask_skip_tags: editing.ask_skip_tags ?? false,
-        ask_extra_vars: editing.ask_extra_vars ?? false,
-        ask_verbosity: editing.ask_verbosity ?? false,
-        ask_diff: editing.ask_diff ?? false,
-        ask_credentials: editing.ask_credentials ?? false,
-        ask_inventory: editing.ask_inventory ?? false,
-        ask_mode: editing.ask_mode ?? false,
+        ask_limit: editing.ask_limit,
+        ask_tags: editing.ask_tags,
+        ask_skip_tags: editing.ask_skip_tags,
+        ask_extra_vars: editing.ask_extra_vars,
+        ask_verbosity: editing.ask_verbosity,
+        ask_diff: editing.ask_diff,
+        ask_credentials: editing.ask_credentials,
+        ask_inventory: editing.ask_inventory,
+        ask_mode: editing.ask_mode,
       });
     } else {
       setForm({ ...init, project_id: projectId ? String(projectId) : "" });
@@ -256,7 +248,7 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
           <div className="space-y-2">
             <label className="block text-xs font-medium">Credentials</label>
             <div className="grid gap-1">
-              {(credentials.data || []).map((c) => (
+              {(credentials.data || []).map((c: Credential) => (
                 <Checkbox
                   key={c.id}
                   id={`cred-${c.id}`}

@@ -1,25 +1,45 @@
-from typing import Optional, List
-import redis.asyncio as aioredis
 import json
-from datetime import datetime
+
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
 from git import Repo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import require, get_current_user
+from app.api.auth import get_current_user
 from app.api.jobs.schemas import ApproveRequest, JobRequest, RelaunchRequest
 from app.core.config import settings
-from app.db.models import Credential, CredentialKind, Inventory, JobEvent, JobMode, JobRun, JobStatus, JobTemplate, Playbook, Project, User, JobHostResult, HostResultStatus, PipelineRun, PipelineStep, PipelineStatus, ProjectMembership
+from app.core.rbac import get_user_permissions
+from app.core.time import utcnow
+from app.db.models import (
+    Credential,
+    CredentialKind,
+    HostResultStatus,
+    Inventory,
+    JobHostResult,
+    JobMode,
+    JobRun,
+    JobStatus,
+    JobTemplate,
+    PipelineRun,
+    PipelineStatus,
+    PipelineStep,
+    Playbook,
+    Project,
+    ProjectMembership,
+    User,
+)
 from app.db.session import get_db
 from app.services.approvals import approve_job_run, freeze_params_snapshot
 from app.services.audit import audit
 from app.services.content import get_inventory_repo_path, get_project_repo_path
 from app.services.credentials import encrypt_payload
-from app.services.rbac_scope import assert_project_perm, _user_global_perms, inventory_visible_to_project
+from app.services.job_access import load_job_for_perm
 from app.services.launch import resolve_launch
+from app.services.rbac_scope import assert_project_perm, inventory_visible_to_project, role_name
 from app.services.surveys import apply_survey
 from app.tasks.run_job import run_job
+
 router = APIRouter()
 
 
@@ -43,11 +63,11 @@ async def request_job(
     if not playbook:
         raise HTTPException(status_code=404, detail={"code": "playbook_not_found", "message": "Playbook not found"})
     if template is None:
-        global_perms = await _user_global_perms(db, user)
+        global_perms = get_user_permissions(user.roles)
         if "system.admin" not in global_perms:
             res = await db.execute(select(ProjectMembership).where(ProjectMembership.project_id == playbook.project_id, ProjectMembership.user_id == user.id))
             membership = res.scalar_one_or_none()
-            role_str = membership.role.value if hasattr(membership.role, "value") else str(membership.role) if membership else ""
+            role_str = role_name(membership.role) if membership else ""
             if role_str != "owner":
                 raise HTTPException(status_code=403, detail={"code": "adhoc_forbidden", "message": "Ad-hoc runs require project admin"})
     else:
@@ -62,7 +82,7 @@ async def request_job(
             plain_vars, secret_vars = apply_survey(template.survey_spec, req.survey_answers)
             survey_vars = set(plain_vars.keys()) | set(secret_vars.keys())
         except ValueError as e:
-            raise HTTPException(status_code=422, detail={"code": str(e), "message": str(e)})
+            raise HTTPException(status_code=422, detail={"code": str(e), "message": str(e)}) from None
 
     try:
         effective, overrides = resolve_launch(template, req, survey_vars)
@@ -70,7 +90,7 @@ async def request_job(
         msg = str(e)
         if msg.startswith("override_not_allowed:"):
             fields = [f.strip() for f in msg.split(":", 1)[1].split(",") if f.strip()]
-            raise HTTPException(status_code=422, detail={"code": "override_not_allowed", "message": "Field not permitted at launch", "fields": fields})
+            raise HTTPException(status_code=422, detail={"code": "override_not_allowed", "message": "Field not permitted at launch", "fields": fields}) from None
         raise
 
     inventory_id = effective["inventory_id"]
@@ -187,13 +207,7 @@ async def relaunch_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    source = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
-    if not source:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
-
-    playbook = (await db.execute(select(Playbook).where(Playbook.id == source.playbook_id))).scalar_one_or_none()
-    if playbook:
-        await assert_project_perm(db, user, playbook.project_id, "job.request")
+    source, _ = await load_job_for_perm(db, user, job_id, "job.request")
     if source.status not in {JobStatus.successful, JobStatus.failed, JobStatus.canceled, JobStatus.timed_out}:
         raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Source run has not finished"})
     snapshot = dict(source.params_snapshot or {})
@@ -238,17 +252,11 @@ async def relaunch_job(
 @router.post("/{job_id}/approve")
 async def approve_job(
     job_id: int,
-    req: Optional[ApproveRequest] = None,
+    req: ApproveRequest | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
-
-    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
-    if playbook:
-        await assert_project_perm(db, user, playbook.project_id, "job.approve")
+    job, _ = await load_job_for_perm(db, user, job_id, "job.approve")
 
     note = (req.approval_note or "").strip() if req else ""
     if not note:
@@ -258,10 +266,10 @@ async def approve_job(
     except ValueError as e:
         err_code = str(e)
         if err_code == "self_approval_forbidden":
-            raise HTTPException(status_code=409, detail={"code": "self_approval_forbidden", "message": "Cannot approve own job run"})
-        elif err_code == "bad_state":
-            raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Job is not in pending_approval state"})
-        raise HTTPException(status_code=400, detail={"code": "error", "message": str(e)})
+            raise HTTPException(status_code=409, detail={"code": "self_approval_forbidden", "message": "Cannot approve own job run"}) from None
+        if err_code == "bad_state":
+            raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Job is not in pending_approval state"}) from None
+        raise HTTPException(status_code=400, detail={"code": "error", "message": str(e)}) from None
 
     if job.pipeline_run_id:
         step = (await db.execute(select(PipelineStep).where(PipelineStep.id == job.pipeline_step_id))).scalar_one_or_none()
@@ -285,13 +293,7 @@ async def reject_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
-
-    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
-    if playbook:
-        await assert_project_perm(db, user, playbook.project_id, "job.approve")
+    job, _ = await load_job_for_perm(db, user, job_id, "job.approve")
 
     if job.status != JobStatus.pending_approval:
         raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Job is not in pending_approval state"})
@@ -301,7 +303,7 @@ async def reject_job(
         prun = (await db.execute(select(PipelineRun).where(PipelineRun.id == job.pipeline_run_id))).scalar_one_or_none()
         if prun:
             prun.status = PipelineStatus.failed
-            prun.finished_at = datetime.utcnow()
+            prun.finished_at = utcnow()
     await db.commit()
     await audit(db, "job_rejected", actor_user_id=user.id, object_type="job_run", object_id=job.id)
     return {"id": job.id, "status": job.status}
@@ -313,13 +315,7 @@ async def cancel_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
-
-    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
-    if playbook:
-        await assert_project_perm(db, user, playbook.project_id, "job.cancel")
+    job, _ = await load_job_for_perm(db, user, job_id, "job.cancel")
     if job.status in (
         JobStatus.successful,
         JobStatus.failed,

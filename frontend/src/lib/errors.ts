@@ -1,5 +1,5 @@
 import type { ApiError } from "./api";
-export const ERROR_COPY: Record<string, string> = {
+const ERROR_COPY: Record<string, string> = {
   csrf_missing: "The request was blocked by CSRF protection. Reload the page and try again.",
   invalid_credentials: "Username or password is incorrect.",
   forbidden: "Your role does not allow this action.",

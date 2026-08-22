@@ -1,9 +1,10 @@
-from typing import Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import JobRun, JobStatus, JobTemplate, Playbook, Inventory, Project
+
+from app.db.models import JobRun, JobStatus
+
 
 def freeze_params_snapshot(
-    project_git_path: str,
+    project_git_path: str,  # noqa: ARG001
     playbook_rel_path: str,
     inventory_rel_path: str,
     mode: str,

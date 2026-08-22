@@ -1,12 +1,11 @@
-from typing import Dict, Set
 
-GLOBAL_PERMISSIONS: Dict[str, Set[str]] = {
-    "admin": {"system.admin", "user.manage", "notification.write", "project.create", "read"},
+GLOBAL_PERMISSIONS: dict[str, set[str]] = {
+    "admin": {"system.admin", "user.manage", "audit.read", "notification.write", "project.create", "read"},
     "user": {"project.create", "read"},
     "auditor": {"audit.read", "read"},
 }
 
-PROJECT_PERMISSIONS: Dict[str, Set[str]] = {
+PROJECT_PERMISSIONS: dict[str, set[str]] = {
     "owner":      {"project.admin", "credential.write", "content.write", "job.request", "job.run_check", "job.approve", "job.cancel", "schedule.write", "pipeline.write", "read"},
     "maintainer": {"credential.write", "content.write", "job.request", "job.run_check", "job.approve", "job.cancel", "schedule.write", "pipeline.write", "read"},
     "developer":  {"content.write", "job.request", "job.run_check", "read"},
@@ -14,12 +13,12 @@ PROJECT_PERMISSIONS: Dict[str, Set[str]] = {
     "viewer":     {"read"},
 }
 
-def get_user_permissions(roles: list) -> Set[str]:
+def get_user_permissions(roles: list) -> set[str]:
     perms = set()
     for role in roles:
         role_name = role.name if hasattr(role, "name") else str(role)
         perms.update(GLOBAL_PERMISSIONS.get(role_name, set()))
     return perms
 
-def get_project_permissions(role_name: str) -> Set[str]:
+def get_project_permissions(role_name: str) -> set[str]:
     return PROJECT_PERMISSIONS.get(role_name, set())

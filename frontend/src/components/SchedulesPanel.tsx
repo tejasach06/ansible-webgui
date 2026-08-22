@@ -16,9 +16,9 @@ import type { Schedule } from "../lib/types";
 
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export function SchedulesPanel({ projectId }: { projectId: number }) {
-  const { canInProject } = useAuth();
-  const canWrite = canInProject(projectId, "schedule.write");
+export function SchedulesPanel({ projectId }: { projectId?: number }) {
+  const { canAny, canInProject } = useAuth();
+  const canWrite = projectId ? canInProject(projectId, "schedule.write") : canAny("schedule.write");
   const { toast } = useToast();
 
   const list = useSchedules();
@@ -33,7 +33,9 @@ export function SchedulesPanel({ projectId }: { projectId: number }) {
   const first = useRef<HTMLSelectElement>(null);
 
   const tmplMap = new Map((templates.data ?? []).map((t) => [t.id, t.name]));
-  const projectSchedules = (list.data ?? []).filter((s) => tmplMap.has(s.template_id));
+  const displayedSchedules = projectId
+    ? (list.data ?? []).filter((s) => tmplMap.has(s.template_id))
+    : (list.data ?? []);
 
   const close = () => {
     setOpen(false);
@@ -59,30 +61,24 @@ export function SchedulesPanel({ projectId }: { projectId: number }) {
       )}
 
       <DataTable<Schedule>
-        rows={projectSchedules}
-        loading={list.isLoading || templates.isLoading}
-        empty={<EmptyState>No schedules yet for this project.</EmptyState>}
+        rows={displayedSchedules}
+        loading={list.isLoading}
+        empty={<EmptyState>No schedules yet. Schedule a job template.</EmptyState>}
         columns={[
           { key: "name", header: "Name", render: (r) => r.name },
-          { key: "template", header: "Template", render: (r) => tmplMap.get(r.template_id) || r.template_id },
-          { key: "cron", header: "Cron", render: (r) => <span className="font-mono">{r.cron_expr}</span> },
-          { key: "tz", header: "Timezone", render: (r) => r.timezone },
+          { key: "template", header: "Template", render: (r) => tmplMap.get(r.template_id) ?? r.template_id },
+          { key: "cron", header: "Cron", render: (r) => r.cron_expr },
+          { key: "timezone", header: "Timezone", render: (r) => r.timezone },
           {
             key: "enabled",
-            header: "Status",
+            header: "Enabled",
             render: (r) => (
               <Checkbox
-                id={`schedule-${r.id}-enabled`}
-                label=""
-                aria-label={`Toggle schedule ${r.name}`}
-                disabled={!canWrite}
+                id={`schedule-enabled-${r.id}`}
+                label={r.enabled ? "Enabled" : "Disabled"}
                 checked={r.enabled}
-                onChange={(e) =>
-                  update.mutate(
-                    { id: r.id, body: { enabled: e.target.checked } },
-                    { onSuccess: () => toast(e.target.checked ? "Schedule enabled" : "Schedule disabled") }
-                  )
-                }
+                disabled={!canWrite || update.isPending}
+                onChange={(e) => update.mutate({ id: r.id, body: { enabled: e.target.checked } })}
               />
             ),
           },
@@ -105,49 +101,60 @@ export function SchedulesPanel({ projectId }: { projectId: number }) {
         title="Create schedule"
         initialFocusRef={first}
         footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={close}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!valid}
-              loading={create.isPending}
-              onClick={() =>
-                create.mutate(
-                  { ...form, template_id: Number(form.template_id) },
-                  {
-                    onSuccess: () => {
-                      close();
-                      toast("Schedule created");
+          (templates.data?.length ?? 0) > 0 && (
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={close}>
+                Cancel
+              </Button>
+              <Button
+                disabled={!valid}
+                loading={create.isPending}
+                onClick={() =>
+                  create.mutate(
+                    {
+                      template_id: Number(form.template_id),
+                      name: form.name,
+                      cron_expr: form.cron_expr,
+                      timezone: form.timezone,
                     },
-                  }
-                )
-              }
-            >
-              Create
-            </Button>
-          </div>
+                    {
+                      onSuccess: () => {
+                        close();
+                        toast("Schedule created");
+                      },
+                    }
+                  )
+                }
+              >
+                Create
+              </Button>
+            </div>
+          )
         }
       >
-        <div className="grid gap-3">
-          <Select
-            ref={first}
-            id="schedule-template"
-            label="Template"
-            value={form.template_id}
-            onChange={(e) => setForm({ ...form, template_id: e.target.value })}
-          >
-            <option value="">Select template</option>
-            {(templates.data ?? []).map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-          <TextInput id="schedule-name" label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <TextInput id="schedule-cron" label="Cron expression (e.g. 0 0 * * *)" value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} />
-          <TextInput id="schedule-tz" label="Timezone" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
-        </div>
+        {(templates.data?.length ?? 0) === 0 ? (
+          <EmptyState>No templates. Create a template before creating schedules.</EmptyState>
+        ) : (
+          <div className="grid gap-3">
+            <Select
+              ref={first}
+              id="schedule-template"
+              label="Template"
+              value={form.template_id}
+              onChange={(e) => setForm({ ...form, template_id: e.target.value })}
+            >
+              <option value="">Select template</option>
+              {templates.data?.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+            <TextInput id="schedule-name" label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <TextInput id="schedule-cron" label="Cron expr" value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} />
+            <TextInput id="schedule-timezone" label="Timezone" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
+          </div>
+        )}
       </Drawer>
 
       <ConfirmDialog

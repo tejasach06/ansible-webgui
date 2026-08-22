@@ -1,10 +1,13 @@
 from datetime import datetime
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.time import utcnow
 from app.db.models import HostResultStatus, JobHostResult, JobPlay, JobTask
 
 RUNNER_EVENTS = {"runner_on_ok", "runner_on_failed", "runner_on_unreachable", "runner_on_skipped"}
 REPORT_EVENTS = {"playbook_on_play_start", "playbook_on_task_start", *RUNNER_EVENTS}
-RESULTS = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0}
 
 
 def event_data(payload):
@@ -35,7 +38,7 @@ def parse_timestamp(value):
         return value
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
     return None
@@ -66,7 +69,7 @@ class ReportBuilder:
         self.pending_tasks = []
         self.pending_results = []
 
-    def handle(self, counter: int, event: str, host: str | None, payload: dict) -> None:
+    def handle(self, counter: int, event: str, _host: str | None, payload: dict) -> None:
         p = dict(payload)
         if "event" not in p and event:
             p["event"] = event
@@ -87,18 +90,19 @@ class ReportBuilder:
             self._host_result(payload, data, counter)
 
     def _play_started(self, payload: dict, data: dict, counter: int):
+        if self.current_play and not self.current_play.finished_at:
+            self.current_play.finished_at = parse_timestamp(data.get("start")) or utcnow()
         uuid = data.get("play_uuid") or payload.get("uuid") or f"play:{counter}"
         play = JobPlay(
             job_run_id=self.job_run_id,
             uuid=uuid,
             name=data.get("play"),
             counter=counter,
-            started_at=parse_timestamp(data.get("start")),
+            started_at=parse_timestamp(data.get("start")) or utcnow(),
         )
         self.current_play = play
         self.plays_by_uuid[uuid] = play
         self.pending_plays.append(play)
-
     def _ensure_play(self, counter: int):
         if self.current_play is not None:
             return self.current_play
@@ -113,6 +117,8 @@ class ReportBuilder:
 
     def _task_started(self, payload: dict, data: dict, counter: int):
         play = self._ensure_play(counter)
+        if self.current_task and not self.current_task.finished_at:
+            self.current_task.finished_at = parse_timestamp(data.get("start")) or utcnow()
         uuid = data.get("task_uuid") or payload.get("uuid") or f"task:{counter}"
         task = JobTask(
             job_run_id=self.job_run_id,
@@ -121,13 +127,12 @@ class ReportBuilder:
             name=data.get("task"),
             action=data.get("task_action"),
             counter=counter,
-            started_at=parse_timestamp(data.get("start")),
+            started_at=parse_timestamp(data.get("start")) or utcnow(),
         )
         task._report_play = play
         self.current_task = task
         self.tasks_by_uuid[uuid] = task
         self.pending_tasks.append(task)
-
     def _host_result(self, payload: dict, data: dict, counter: int):
         task = self.tasks_by_uuid.get(data.get("task_uuid")) or self.current_task
         host = event_host(payload)
@@ -145,6 +150,11 @@ class ReportBuilder:
             res=data.get("res"),
         )
         result._report_task = task
+        if data.get("end"):
+            end_time = parse_timestamp(data.get("end")) or utcnow()
+            task.finished_at = end_time
+            if self.current_play:
+                self.current_play.finished_at = end_time
         self.pending_results.append(result)
 
     def flush(self, db):
@@ -166,3 +176,108 @@ class ReportBuilder:
             db.add_all(self.pending_results)
             db.flush()
             self.pending_results.clear()
+
+
+async def build_report(db: AsyncSession, job_id: int) -> dict:
+    plays = (await db.execute(select(JobPlay).where(JobPlay.job_run_id == job_id).order_by(JobPlay.counter.asc()))).scalars().all()
+    tasks = (await db.execute(select(JobTask).where(JobTask.job_run_id == job_id).order_by(JobTask.counter.asc()))).scalars().all()
+    host_results = (await db.execute(select(JobHostResult).where(JobHostResult.job_run_id == job_id).order_by(JobHostResult.counter.asc()))).scalars().all()
+
+    hr_by_task = {}
+    hr_by_host = {}
+    totals = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0}
+
+    for hr in host_results:
+        st = hr.status.value if hasattr(hr.status, "value") else str(hr.status)
+        totals[st] = totals.get(st, 0) + 1
+
+        if hr.task_id not in hr_by_task:
+            hr_by_task[hr.task_id] = []
+        hr_by_task[hr.task_id].append(hr)
+
+        if hr.host not in hr_by_host:
+            hr_by_host[hr.host] = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0, "first_failure_counter": None}
+        hr_by_host[hr.host][st] = hr_by_host[hr.host].get(st, 0) + 1
+
+        if st in ("failed", "unreachable"):
+            ffc = hr_by_host[hr.host]["first_failure_counter"]
+            if ffc is None or hr.counter < ffc:
+                hr_by_host[hr.host]["first_failure_counter"] = hr.counter
+
+    tasks_by_play = {}
+    for task in tasks:
+        t_hrs = hr_by_task.get(task.id, [])
+        res = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0}
+        failed_hosts = []
+        first_fail_counter = None
+        durations = []
+
+        for hr in t_hrs:
+            st = hr.status.value if hasattr(hr.status, "value") else str(hr.status)
+            res[st] = res.get(st, 0) + 1
+            if hr.duration_ms is not None:
+                durations.append(hr.duration_ms)
+
+            is_failed = (st == "unreachable") or (st == "failed" and not hr.ignore_errors)
+            if is_failed:
+                if hr.host not in failed_hosts:
+                    failed_hosts.append(hr.host)
+                if first_fail_counter is None or hr.counter < first_fail_counter:
+                    first_fail_counter = hr.counter
+
+        task_dict = {
+            "uuid": task.uuid,
+            "name": task.name,
+            "action": task.action,
+            "duration_ms": max(durations) if durations else 0,
+            "results": res,
+            "failed_hosts": failed_hosts,
+            "first_failure_counter": first_fail_counter,
+        }
+
+        if task.play_id not in tasks_by_play:
+            tasks_by_play[task.play_id] = []
+        tasks_by_play[task.play_id].append(task_dict)
+
+    plays_list = []
+    for play in plays:
+        p_tasks = tasks_by_play.get(play.id, [])
+        p_durations = [t["duration_ms"] for t in p_tasks]
+        plays_list.append({
+            "uuid": play.uuid,
+            "name": play.name,
+            "duration_ms": sum(p_durations),
+            "tasks": p_tasks,
+        })
+
+    hosts_list = []
+    for host_name, stats in hr_by_host.items():
+        if stats["unreachable"] > 0:
+            st = "unreachable"
+        elif stats["failed"] > 0:
+            st = "failed"
+        elif stats["changed"] > 0:
+            st = "changed"
+        elif stats["ok"] > 0:
+            st = "ok"
+        else:
+            st = "skipped"
+
+        hosts_list.append({
+            "host": host_name,
+            "ok": stats["ok"],
+            "changed": stats["changed"],
+            "failed": stats["failed"],
+            "unreachable": stats["unreachable"],
+            "skipped": stats["skipped"],
+            "status": st,
+            "first_failure_counter": stats["first_failure_counter"],
+        })
+
+    hosts_list.sort(key=lambda h: (0 if h["status"] in ("failed", "unreachable") else 1, h["host"]))
+
+    return {
+        "plays": plays_list,
+        "hosts": hosts_list,
+        "totals": totals,
+    }

@@ -46,4 +46,3 @@ export function OverrideDiff({ overrides }: { overrides?: Record<string, Overrid
   );
 }
 
-export default OverrideDiff;

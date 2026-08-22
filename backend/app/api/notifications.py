@@ -17,7 +17,7 @@ def item(n: Notification):
 
 
 @router.get("")
-async def list_notifications(user: User = Depends(require("read")), db: AsyncSession = Depends(get_db)):
+async def list_notifications(_user: User = Depends(require("read")), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(Notification).order_by(Notification.name))).scalars().all()
     return [item(n) for n in rows]
 
@@ -30,7 +30,7 @@ async def create_notification(req: dict, user: User = Depends(require("notificat
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail={"code": "notification_name_taken", "message": "Notification name already exists"})
+        raise HTTPException(status_code=409, detail={"code": "notification_name_taken", "message": "Notification name already exists"}) from None
     await db.refresh(n)
     await audit(db, "notification_created", actor_user_id=user.id, object_type="notification", object_id=n.id)
     return item(n)
@@ -48,7 +48,7 @@ async def update_notification(notification_id: int, req: dict, user: User = Depe
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail={"code": "notification_name_taken", "message": "Notification name already exists"})
+        raise HTTPException(status_code=409, detail={"code": "notification_name_taken", "message": "Notification name already exists"}) from None
     await db.refresh(n)
     await audit(db, "notification_updated", actor_user_id=user.id, object_type="notification", object_id=n.id)
     return item(n)

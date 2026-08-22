@@ -7,10 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.core.config import settings
 from app.db.models import JobEvent, User
 from app.db.session import get_db
-from app.core.config import settings
-
 
 router = APIRouter()
 
@@ -20,7 +19,7 @@ async def stream_job_events(
     job_id: int,
     request: Request,
     after_counter: int = 0,
-    user: User = Depends(get_current_user),
+    _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     async def event_generator():

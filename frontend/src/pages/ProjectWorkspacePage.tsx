@@ -46,7 +46,7 @@ export function ProjectWorkspacePage() {
   const canRun = canInProject(projectId, "job.request") || canInProject(projectId, "job.run_check");
 
   if (projects.error) return <ErrorBanner error={projects.error} />;
-  if (!projects.isLoading && !project)
+  if (!projects.isLoading && (!project || project.is_inventory_repo))
     return (
       <EmptyState action={<Link className={linkClass} to="/projects">Back to projects</Link>}>
         Project not found.

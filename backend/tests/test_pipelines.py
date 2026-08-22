@@ -1,5 +1,19 @@
 import pytest
-from app.db.models import Pipeline, PipelineStep, PipelineRun, PipelineStatus, JobRun, JobStatus, JobTemplate, Playbook, Inventory, Project, User, Role
+
+from app.db.models import (
+    Inventory,
+    JobRun,
+    JobStatus,
+    JobTemplate,
+    Pipeline,
+    PipelineRun,
+    PipelineStatus,
+    PipelineStep,
+    Playbook,
+    Project,
+    User,
+)
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_pipeline_approval_flow(db, client):

@@ -1,18 +1,18 @@
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from git import Repo
+import anyio
 import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, HTTPException
+from git import Repo
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.db.models import Pipeline, PipelineStep, PipelineRun, PipelineStatus, JobTemplate, JobRun, Project, User
-from app.api.auth import get_current_user, require_project
-from app.services.rbac_scope import visible_project_ids, assert_project_perm
-from app.services.audit import audit
-from app.services.content import get_project_repo_path, get_inventory_repo_path
+from app.api.auth import get_current_user
 from app.core.config import settings
+from app.db.models import JobRun, JobTemplate, Pipeline, PipelineRun, PipelineStatus, PipelineStep, Project, User
+from app.db.session import get_db
+from app.services.audit import audit
+from app.services.content import get_inventory_repo_path, get_project_repo_path
+from app.services.rbac_scope import assert_project_perm, visible_project_ids
 
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
@@ -24,18 +24,18 @@ class PipelineStepIn(BaseModel):
 class PipelineCreate(BaseModel):
     project_id: int
     name: str
-    description: Optional[str] = None
-    steps: List[PipelineStepIn]
+    description: str | None = None
+    steps: list[PipelineStepIn]
 
 class PipelineUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    enabled: Optional[bool] = None
-    steps: Optional[List[PipelineStepIn]] = None
+    name: str | None = None
+    description: str | None = None
+    enabled: bool | None = None
+    steps: list[PipelineStepIn] | None = None
 
 @router.get("")
 async def list_pipelines(
-    project_id: Optional[int] = None,
+    project_id: int | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -102,7 +102,7 @@ async def create_pipeline(
 
 @router.get("/runs")
 async def list_pipeline_runs(
-    pipeline_id: Optional[int] = None,
+    pipeline_id: int | None = None,
     limit: int = 50,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -322,7 +322,7 @@ async def delete_pipeline(
     await db.delete(pipeline)
     await db.commit()
     await audit(db, "pipeline_deleted", actor_user_id=user.id, object_type="pipeline", object_id=pipeline_id)
-    return None
+    return
 
 @router.post("/{pipeline_id}/run")
 async def run_pipeline_endpoint(
@@ -346,9 +346,9 @@ async def run_pipeline_endpoint(
 
     project = (await db.execute(select(Project).where(Project.id == pipeline.project_id))).scalar_one_or_none()
     repo_path = get_project_repo_path(project.name)
-    git_sha = Repo(repo_path).head.commit.hexsha
+    git_sha = await anyio.to_thread.run_sync(lambda: Repo(repo_path).head.commit.hexsha)
     inventory_repo_path = get_inventory_repo_path()
-    inventory_git_sha = Repo(inventory_repo_path).head.commit.hexsha
+    inventory_git_sha = await anyio.to_thread.run_sync(lambda: Repo(inventory_repo_path).head.commit.hexsha)
 
     params_snapshot = {
         "git_sha": git_sha,

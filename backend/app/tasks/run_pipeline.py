@@ -1,20 +1,30 @@
-from datetime import datetime
-import json
 import redis
-from sqlalchemy import select, and_
+from sqlalchemy import select
 
-from app.tasks.worker import celery_app
-from app.db.session import SyncSessionLocal
-from app.db.models import PipelineRun, PipelineStep, PipelineStatus, JobRun, JobStatus, JobTemplate, Playbook, Inventory, Project
-from app.services.approvals import freeze_params_snapshot
-from app.services.rbac_scope import inventory_visible_to_project
-from app.services.content import get_project_repo_path, get_inventory_repo_path
 from app.core.config import settings
+from app.core.time import utcnow
+from app.db import session as db_session
+from app.db.models import (
+    Inventory,
+    JobRun,
+    JobStatus,
+    JobTemplate,
+    PipelineRun,
+    PipelineStatus,
+    PipelineStep,
+    Playbook,
+    Project,
+)
+from app.services.approvals import freeze_params_snapshot
+from app.services.content import get_project_repo_path
+from app.services.rbac_scope import inventory_visible_to_project
 from app.tasks.run_job import run_job
+from app.tasks.worker import celery_app
+
 
 @celery_app.task(name="run_pipeline")
 def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
-    db = SyncSessionLocal()
+    db = db_session.SyncSessionLocal()
     r = redis.from_url(settings.REDIS_URL)
 
     try:
@@ -22,13 +32,11 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
         if not prun:
             return
 
-        if prun.status not in (PipelineStatus.running, PipelineStatus.queued, PipelineStatus.pending_approval):
-            if prun.status == PipelineStatus.canceled:
-                return
-
+        if prun.status == PipelineStatus.canceled:
+            return
         prun.status = PipelineStatus.running
         if not prun.started_at:
-            prun.started_at = datetime.utcnow()
+            prun.started_at = utcnow()
         db.commit()
 
         steps = db.execute(
@@ -37,11 +45,21 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
             .order_by(PipelineStep.position.asc())
         ).scalars().all()
 
+        template_ids = [s.template_id for s in steps]
+        templates = {t.id: t for t in db.execute(select(JobTemplate).where(JobTemplate.id.in_(template_ids))).scalars().all()} if template_ids else {}
+        playbook_ids = [t.playbook_id for t in templates.values()]
+        project_ids = [t.project_id for t in templates.values()]
+        playbooks = {p.id: p for p in db.execute(select(Playbook).where(Playbook.id.in_(playbook_ids))).scalars().all()} if playbook_ids else {}
+        projects = {p.id: p for p in db.execute(select(Project).where(Project.id.in_(project_ids))).scalars().all()} if project_ids else {}
+        inv_ids = {t.inventory_id for t in templates.values() if t.inventory_id} | {p.default_inventory_id for p in projects.values() if p.default_inventory_id}
+        inventories = {i.id: i for i in db.execute(select(Inventory).where(Inventory.id.in_(inv_ids))).scalars().all()} if inv_ids else {}
+
+
         for step in steps:
             # Check cancel flag
             if r.get(f"pipeline:{pipeline_run_id}:cancel") == b"1":
                 prun.status = PipelineStatus.canceled
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
 
@@ -56,20 +74,20 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
                 )
             ).scalar_one_or_none()
 
-            tmpl = db.execute(select(JobTemplate).where(JobTemplate.id == step.template_id)).scalar_one_or_none()
+            tmpl = templates.get(step.template_id)
             if not tmpl:
                 prun.status = PipelineStatus.failed
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
 
-            playbook = db.execute(select(Playbook).where(Playbook.id == tmpl.playbook_id)).scalar_one_or_none()
-            project = db.execute(select(Project).where(Project.id == tmpl.project_id)).scalar_one_or_none()
+            playbook = playbooks.get(tmpl.playbook_id)
+            project = projects.get(tmpl.project_id)
             effective_inventory_id = tmpl.inventory_id or (project.default_inventory_id if project else None)
-            inventory = db.execute(select(Inventory).where(Inventory.id == effective_inventory_id)).scalar_one_or_none() if effective_inventory_id else None
+            inventory = inventories.get(effective_inventory_id)
             if not inventory or not inventory_visible_to_project(inventory, tmpl.project_id):
                 prun.status = PipelineStatus.failed
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
 
@@ -130,28 +148,26 @@ def run_pipeline(pipeline_run_id: int, resume_from: int = 0):
 
             if term_status == "successful":
                 continue
-            elif term_status in ("canceled", "rejected"):
+            if term_status in ("canceled", "rejected"):
                 prun.status = PipelineStatus.canceled if term_status == "canceled" else PipelineStatus.failed
-                prun.finished_at = datetime.utcnow()
+                prun.finished_at = utcnow()
                 db.commit()
                 return
-            else:
-                if step.continue_on_failure:
-                    continue
-                else:
-                    prun.status = PipelineStatus.failed
-                    prun.finished_at = datetime.utcnow()
-                    db.commit()
-                    return
+            if step.continue_on_failure:
+                continue
+            prun.status = PipelineStatus.failed
+            prun.finished_at = utcnow()
+            db.commit()
+            return
 
         prun.status = PipelineStatus.successful
-        prun.finished_at = datetime.utcnow()
+        prun.finished_at = utcnow()
         db.commit()
 
     except Exception:
         if 'prun' in locals() and prun:
             prun.status = PipelineStatus.failed
-            prun.finished_at = datetime.utcnow()
+            prun.finished_at = utcnow()
             db.commit()
         raise
     finally:

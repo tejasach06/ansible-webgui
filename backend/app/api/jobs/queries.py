@@ -1,22 +1,33 @@
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import get_db
-from app.db.models import JobRun, JobStatus, JobEvent, JobPlay, JobTask, JobHostResult, Playbook, User, HostResultStatus, Project, Inventory, Credential, JobTemplate
+
 from app.api.auth import get_current_user, require
-from app.services.rbac_scope import visible_project_ids, assert_project_perm
+from app.core.time import utcnow
+from app.db.models import (
+    Credential,
+    Inventory,
+    JobRun,
+    JobStatus,
+    JobTemplate,
+    Playbook,
+    Project,
+    User,
+)
+from app.db.session import get_db
+from app.services.job_access import load_job_for_perm
+from app.services.run_report import build_report
 
 router = APIRouter()
 @router.get("")
 async def list_jobs(
-    status: Optional[JobStatus] = None,
-    template_id: Optional[int] = None,
+    status: JobStatus | None = None,
+    template_id: int | None = None,
     limit: int = 50,
     offset: int = 0,
-    user: User = Depends(require("read")),
+    _user: User = Depends(require("read")),
     db: AsyncSession = Depends(get_db)
 ):
     filters = []
@@ -32,10 +43,10 @@ async def list_jobs(
 
 
 @router.get("/summary")
-async def job_summary(user: User = Depends(require("read")), db: AsyncSession = Depends(get_db)):
+async def job_summary(_user: User = Depends(require("read")), db: AsyncSession = Depends(get_db)):
     pending = (await db.execute(select(JobRun).where(JobRun.status == JobStatus.pending_approval).order_by(JobRun.created_at.asc()).limit(20))).scalars().all()
     running = (await db.execute(select(func.count(JobRun.id)).where(JobRun.status.in_([JobStatus.running, JobStatus.queued])))).scalar_one()
-    since = datetime.utcnow() - timedelta(days=7)
+    since = utcnow() - timedelta(days=7)
     grouped = (await db.execute(select(JobRun.status, func.count(JobRun.id)).where(JobRun.created_at >= since).group_by(JobRun.status))).all()
     recent = (await db.execute(select(JobRun).order_by(JobRun.created_at.desc()).limit(10))).scalars().all()
     return {
@@ -46,128 +57,14 @@ async def job_summary(user: User = Depends(require("read")), db: AsyncSession = 
     }
 
 
-async def _event_rows(job_id: int, db: AsyncSession):
-    exists = (await db.execute(select(JobRun.id).where(JobRun.id == job_id))).scalar_one_or_none()
-    if not exists:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
-    return (await db.execute(select(JobEvent.counter, JobEvent.event, JobEvent.host, JobEvent.payload).where(JobEvent.job_run_id == job_id, JobEvent.event.in_(RELEVANT_EVENTS)).order_by(JobEvent.counter.asc()))).all()
-
 
 @router.get("/{job_id}/report")
 async def get_job_report(job_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
-
-    playbook = (await db.execute(select(Playbook).where(Playbook.id == job.playbook_id))).scalar_one_or_none()
-    if playbook:
-        await assert_project_perm(db, user, playbook.project_id, "read")
-
-    plays = (await db.execute(select(JobPlay).where(JobPlay.job_run_id == job_id).order_by(JobPlay.counter.asc()))).scalars().all()
-    tasks = (await db.execute(select(JobTask).where(JobTask.job_run_id == job_id).order_by(JobTask.counter.asc()))).scalars().all()
-    host_results = (await db.execute(select(JobHostResult).where(JobHostResult.job_run_id == job_id).order_by(JobHostResult.counter.asc()))).scalars().all()
-
-    hr_by_task = {}
-    hr_by_host = {}
-    totals = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0}
-
-    for hr in host_results:
-        st = hr.status.value if hasattr(hr.status, "value") else str(hr.status)
-        totals[st] = totals.get(st, 0) + 1
-
-        if hr.task_id not in hr_by_task:
-            hr_by_task[hr.task_id] = []
-        hr_by_task[hr.task_id].append(hr)
-
-        if hr.host not in hr_by_host:
-            hr_by_host[hr.host] = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0, "first_failure_counter": None}
-        hr_by_host[hr.host][st] = hr_by_host[hr.host].get(st, 0) + 1
-
-        if st in ("failed", "unreachable"):
-            ffc = hr_by_host[hr.host]["first_failure_counter"]
-            if ffc is None or hr.counter < ffc:
-                hr_by_host[hr.host]["first_failure_counter"] = hr.counter
-
-    tasks_by_play = {}
-    for task in tasks:
-        t_hrs = hr_by_task.get(task.id, [])
-        res = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0}
-        failed_hosts = []
-        first_fail_counter = None
-        durations = []
-
-        for hr in t_hrs:
-            st = hr.status.value if hasattr(hr.status, "value") else str(hr.status)
-            res[st] = res.get(st, 0) + 1
-            if hr.duration_ms is not None:
-                durations.append(hr.duration_ms)
-
-            is_failed = (st == "unreachable") or (st == "failed" and not hr.ignore_errors)
-            if is_failed:
-                if hr.host not in failed_hosts:
-                    failed_hosts.append(hr.host)
-                if first_fail_counter is None or hr.counter < first_fail_counter:
-                    first_fail_counter = hr.counter
-
-        task_dict = {
-            "uuid": task.uuid,
-            "name": task.name,
-            "action": task.action,
-            "duration_ms": max(durations) if durations else 0,
-            "results": res,
-            "failed_hosts": failed_hosts,
-            "first_failure_counter": first_fail_counter,
-        }
-
-        if task.play_id not in tasks_by_play:
-            tasks_by_play[task.play_id] = []
-        tasks_by_play[task.play_id].append(task_dict)
-
-    plays_list = []
-    for play in plays:
-        p_tasks = tasks_by_play.get(play.id, [])
-        p_durations = [t["duration_ms"] for t in p_tasks]
-        plays_list.append({
-            "uuid": play.uuid,
-            "name": play.name,
-            "duration_ms": sum(p_durations),
-            "tasks": p_tasks,
-        })
-
-    hosts_list = []
-    for host_name, stats in hr_by_host.items():
-        if stats["unreachable"] > 0:
-            st = "unreachable"
-        elif stats["failed"] > 0:
-            st = "failed"
-        elif stats["changed"] > 0:
-            st = "changed"
-        elif stats["ok"] > 0:
-            st = "ok"
-        else:
-            st = "skipped"
-
-        hosts_list.append({
-            "host": host_name,
-            "ok": stats["ok"],
-            "changed": stats["changed"],
-            "failed": stats["failed"],
-            "unreachable": stats["unreachable"],
-            "skipped": stats["skipped"],
-            "status": st,
-            "first_failure_counter": stats["first_failure_counter"],
-        })
-
-    hosts_list.sort(key=lambda h: (0 if h["status"] in ("failed", "unreachable") else 1, h["host"]))
-
-    return {
-        "plays": plays_list,
-        "hosts": hosts_list,
-        "totals": totals,
-    }
+    await load_job_for_perm(db, user, job_id, "read")
+    return await build_report(db, job_id)
 
 @router.get("/{job_id}")
-async def get_job_detail(job_id: int, user: User = Depends(require("read")), db: AsyncSession = Depends(get_db)):
+async def get_job_detail(job_id: int, _user: User = Depends(require("read")), db: AsyncSession = Depends(get_db)):
     job = (await db.execute(select(JobRun).where(JobRun.id == job_id))).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Job run not found"})
