@@ -118,7 +118,12 @@ def run_job(job_run_id: int):
                 skip_tags=snapshot.get("skip_tags"),
                 verbosity=snapshot.get("verbosity", 0),
                 forks=snapshot.get("forks", 5),
-                envvars={"ANSIBLE_FORCE_COLOR": "1", "PY_COLORS": "1", "ANSIBLE_STDOUT_CALLBACK": "default"},
+                envvars={
+                    "ANSIBLE_FORCE_COLOR": "1",
+                    "PY_COLORS": "1",
+                    "ANSIBLE_STDOUT_CALLBACK": "default",
+                    "ANSIBLE_COLLECTIONS_PATH": f"{os.path.join(proj_export, 'collections')}:/usr/share/ansible/collections",
+                },
                 cmdline=cmdline_str if cmdline_str else None,
                 event_handler=event_handler,
                 cancel_callback=cancel_callback,
