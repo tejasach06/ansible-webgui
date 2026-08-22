@@ -102,4 +102,3 @@ export function MembersPanel({ projectId }: { projectId: number }) {
   );
 }
 
-export default MembersPanel;

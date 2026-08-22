@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def utcnow() -> datetime:
     """Timezone-aware UTC now. Replaces the deprecated datetime.utcnow()."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)

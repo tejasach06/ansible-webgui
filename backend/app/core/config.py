@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 
+
 class Settings(BaseSettings):
     POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: int = 5432

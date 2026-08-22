@@ -1,10 +1,10 @@
 from uuid import uuid4
 
 import pytest
+from test_content_api import login
 
 from app.db.models import Inventory, InventoryFormat, JobMode, JobRun, JobStatus, Playbook, Project
 from app.services.run_report import ReportBuilder
-from test_content_api import login
 
 
 async def _persist_report(db, builder: ReportBuilder):

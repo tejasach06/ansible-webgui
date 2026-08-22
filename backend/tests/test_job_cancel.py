@@ -2,12 +2,11 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from test_content_api import login
 
 from app.api.jobs import lifecycle
 from app.core.config import settings
 from app.db.models import Inventory, InventoryFormat, JobMode, JobRun, JobStatus, Playbook, Project, User
-
-from test_content_api import login
 
 
 class FakeRedis:

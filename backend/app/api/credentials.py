@@ -1,17 +1,20 @@
-from typing import Optional, Literal
+from typing import Literal
+
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db.session import get_db
-from app.db.models import Credential, CredentialKind, JobTemplate, User, Project, Playbook
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_user, require_csrf
-from app.services.credentials import encrypt_payload
-from app.services.ssh_keys import generate_keypair
-from app.services.content import commit_file, get_project_repo_path, validate_safe_path
+from app.db.models import Credential, CredentialKind, JobTemplate, Playbook, Project, User
+from app.db.session import get_db
 from app.services.audit import audit
+from app.services.content import commit_file, get_project_repo_path, validate_safe_path
+from app.services.credentials import encrypt_payload
 from app.services.rbac_scope import assert_project_perm, visible_project_ids
+from app.services.ssh_keys import generate_keypair
+
 router = APIRouter(prefix="/api/credentials", tags=["credentials"])
 
 class CredentialCreate(BaseModel):
@@ -19,19 +22,19 @@ class CredentialCreate(BaseModel):
     name: str
     kind: CredentialKind
     payload: str
-    username: Optional[str] = None
+    username: str | None = None
     become_same_as_ssh: bool = False
 
 class CredentialUpdate(BaseModel):
-    name: Optional[str] = None
-    username: Optional[str] = None
-    payload: Optional[str] = None
-    become_same_as_ssh: Optional[bool] = None
+    name: str | None = None
+    username: str | None = None
+    payload: str | None = None
+    become_same_as_ssh: bool | None = None
 
 class CredentialGenerate(BaseModel):
     project_id: int
     name: str
-    username: Optional[str] = None
+    username: str | None = None
     key_type: Literal["ed25519", "rsa4096"] = "ed25519"
 def _credential_response(c: Credential):
     return {
@@ -63,7 +66,7 @@ async def _load_credential(db: AsyncSession, cred_id: int) -> Credential:
 
 @router.get("")
 async def list_credentials(
-    project_id: Optional[int] = None,
+    project_id: int | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -107,7 +110,7 @@ async def generate_credential(
         raise HTTPException(
             status_code=422,
             detail={"code": "bad_key_type", "message": "Unsupported key type"},
-        )
+        ) from None
 
     c = Credential(
         project_id=req.project_id,
@@ -281,7 +284,7 @@ async def create_bootstrap_playbook(
         raise HTTPException(
             status_code=400,
             detail={"code": "bad_path", "message": "Invalid path"},
-        )
+        ) from None
 
     disk_content = file_path.read_text() if file_path.exists() else None
     if disk_content != BOOTSTRAP_PLAYBOOK_CONTENT:

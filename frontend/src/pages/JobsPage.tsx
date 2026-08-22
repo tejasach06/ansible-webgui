@@ -9,7 +9,7 @@ import { DataTable } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { buildLaunchBody, init, JobLaunchForm, surveyComplete } from "../components/JobLaunchForm";
+import { buildLaunchBody, formFromTemplate, init, JobLaunchForm, surveyComplete } from "../components/JobLaunchForm";
 import { Pagination } from "../components/Pagination";
 import { Select } from "../components/Field";
 import { StatusPill } from "../components/StatusPill";
@@ -76,22 +76,7 @@ export function JobsPage() {
 
   const pickTemplate = (id: string) => {
     const t = templates.data?.find((x) => String(x.id) === id);
-    setForm({
-      ...form,
-      template_id: id,
-      playbook_id: t ? String(t.playbook_id) : form.playbook_id,
-      inventory_id: t ? String(t.inventory_id) : form.inventory_id,
-      mode: t ? "live" : form.mode,
-      limit: t?.limit_pattern ?? "",
-      tags: t?.tags ?? "",
-      skip_tags: t?.skip_tags ?? "",
-      verbosity: t?.verbosity ?? form.verbosity,
-      forks: t?.forks ?? form.forks,
-      credential_ids: t ? t.credential_ids : form.credential_ids,
-      extra_vars: JSON.stringify(t?.extra_vars ?? {}, null, 2),
-      diff: t?.diff_mode ?? form.diff,
-      survey_answers: {},
-    });
+    setForm(formFromTemplate(form, t, id));
   };
 
   const submit = () => {
@@ -209,7 +194,6 @@ export function JobsPage() {
           setExtraError={setExtraError}
           firstRef={first}
           onTemplateChange={pickTemplate}
-          onNewInventory={() => undefined}
         />
       </Drawer>
     </section>

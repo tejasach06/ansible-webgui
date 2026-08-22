@@ -40,4 +40,3 @@ export function HostMatrix({ data, onJump }: { data?: HostMatrixData; onJump?: (
   );
 }
 
-export default HostMatrix;

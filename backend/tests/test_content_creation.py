@@ -1,13 +1,11 @@
 import pytest
 from git import Actor, Repo
 from sqlalchemy import select
+from test_content_api import login
 
 from app.core.config import settings
 from app.db.models import AuditLog, Commit
 from app.services.content import ensure_inventory_repo, get_inventory_repo_path, get_project_repo_path
-
-from test_content_api import login
-
 
 PLAYBOOK = """---
 - name: Test play

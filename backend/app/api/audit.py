@@ -1,4 +1,3 @@
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -13,12 +12,12 @@ router = APIRouter(prefix="/api/audit", tags=["audit"])
 
 @router.get("")
 async def list_audit(
-    action: Optional[str] = None,
-    actor_user_id: Optional[int] = None,
-    object_type: Optional[str] = None,
+    action: str | None = None,
+    actor_user_id: int | None = None,
+    object_type: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    user: User = Depends(require("user.manage")),
+    _user: User = Depends(require("audit.read")),
     db: AsyncSession = Depends(get_db),
 ):
     filters = []

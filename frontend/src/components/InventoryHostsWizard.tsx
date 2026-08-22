@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { InventoryFormat } from "../lib/types";
 import { Select, TextArea, TextInput } from "./Field";
 
-export function parseHosts(value: string) {
+function parseHosts(value: string) {
   const seen = new Set<string>();
   return value.split(/[\s,]+/).map(h => h.trim()).filter(Boolean).filter(h => seen.has(h) ? false : (seen.add(h), true));
 }

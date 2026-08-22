@@ -5,13 +5,12 @@ from git import Repo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import require, require_project
+from app.api.auth import require_project
 from app.api.content.schemas import SaveFileRequest
 from app.db.models import Project, User
 from app.db.session import get_db
-from app.services.content import commit_file, get_project_repo_path, validate_safe_path
 from app.services.audit import audit
-
+from app.services.content import commit_file, get_project_repo_path, validate_safe_path
 
 router = APIRouter()
 
@@ -20,7 +19,7 @@ router = APIRouter()
 async def get_file(
     project_id: int,
     path: str,
-    user: User = Depends(require_project("read")),
+    _user: User = Depends(require_project("read")),
     db: AsyncSession = Depends(get_db)
 ):
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
@@ -31,7 +30,7 @@ async def get_file(
     try:
         file_path = validate_safe_path(repo_path, path)
     except ValueError:
-        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"})
+        raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Invalid path"}) from None
 
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail={"code": "file_not_found", "message": "File not found"})
@@ -53,7 +52,7 @@ async def get_file(
 @router.get("/{project_id}/tree")
 async def get_tree(
     project_id: int,
-    user: User = Depends(require_project("read")),
+    _user: User = Depends(require_project("read")),
     db: AsyncSession = Depends(get_db)
 ):
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()

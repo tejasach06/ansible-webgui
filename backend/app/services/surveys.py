@@ -40,7 +40,7 @@ def apply_survey(spec: list, answers: dict) -> tuple[dict, dict]:
             try:
                 value = int(value)
             except (TypeError, ValueError):
-                raise ValueError("survey_answer_invalid")
+                raise ValueError("survey_answer_invalid") from None
             if field.get("min") is not None and value < field["min"]:
                 raise ValueError("survey_answer_invalid")
             if field.get("max") is not None and value > field["max"]:

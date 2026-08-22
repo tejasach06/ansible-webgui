@@ -3,12 +3,11 @@ from git import Actor, Repo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import require
+from app.api.auth import require_project
 from app.api.content.schemas import CreateRoleRequest
 from app.db.models import Commit, Project, User
 from app.db.session import get_db
 from app.services.content import get_project_repo_path
-
 
 router = APIRouter()
 
@@ -17,7 +16,7 @@ router = APIRouter()
 async def create_role(
     project_id: int,
     req: CreateRoleRequest,
-    user: User = Depends(require("content.write")),
+    user: User = Depends(require_project("content.write")),
     db: AsyncSession = Depends(get_db)
 ):
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()

@@ -35,7 +35,8 @@ dependencies = [
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "pip-audit==2.8.0"
+    "pip-audit==2.8.0",
+    "ruff==0.8.6",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -46,4 +47,20 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning",
+    "ignore::jwt.warnings.InsecureKeyLengthWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+cache-dir = "/tmp/.ruff_cache"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RET", "C4", "ARG"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002"]

@@ -8,6 +8,7 @@ import {
   useGenerateCredential,
   useUpdateCredential,
 } from "../api/credentials";
+import { useProjects } from "../api/projects";
 import { useAuth } from "../lib/auth";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
@@ -23,21 +24,23 @@ import type { Credential, CredentialKind } from "../lib/types";
 
 const kinds: CredentialKind[] = ["ssh_key", "ssh_password", "vault_password", "become_password"];
 
-export function CredentialsPanel({ projectId }: { projectId: number }) {
-  const { canInProject } = useAuth();
-  const canWrite = canInProject(projectId, "credential.write");
+export function CredentialsPanel({ projectId }: { projectId?: number }) {
+  const { user, canAny, canInProject } = useAuth();
+  const canWrite = projectId ? canInProject(projectId, "credential.write") : canAny("credential.write") || Object.keys(user?.project_perms ?? {}).length > 0;
   const { toast } = useToast();
   const list = useCredentials(projectId);
+  const projects = useProjects();
   const create = useCreateCredentials();
   const generate = useGenerateCredential();
   const bootstrap = useBootstrapPlaybook();
   const del = useDeleteCredentials();
 
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", kind: "ssh_key" as CredentialKind, username: "", payload: "", become_same_as_ssh: false });
+  const [form, setForm] = useState({ project_id: projectId ? String(projectId) : "", name: "", kind: "ssh_key" as CredentialKind, username: "", payload: "", become_same_as_ssh: false });
 
   const [genOpen, setGenOpen] = useState(false);
-  const [genForm, setGenForm] = useState({ name: "", username: "", key_type: "ed25519" as "ed25519" | "rsa4096" });
+  const [genForm, setGenForm] = useState({ project_id: projectId ? String(projectId) : "", name: "", username: "", key_type: "ed25519" as "ed25519" | "rsa4096" });
 
   const [viewKey, setViewKey] = useState<Credential>();
   const [deploy, setDeploy] = useState<{ playbookId: number; publicKey: string }>();
@@ -51,30 +54,35 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
   const genFirst = useRef<HTMLInputElement>(null);
   const editFirst = useRef<HTMLInputElement>(null);
 
+  const projectName = (id: number) => projects.data?.find((p) => p.id === id)?.name ?? String(id);
+
   const close = () => {
     setOpen(false);
-    setForm({ name: "", kind: "ssh_key", username: "", payload: "", become_same_as_ssh: false });
+    setForm({ project_id: projectId ? String(projectId) : "", name: "", kind: "ssh_key", username: "", payload: "", become_same_as_ssh: false });
   };
 
   const closeGen = () => {
     setGenOpen(false);
-    setGenForm({ name: "", username: "", key_type: "ed25519" });
+    setGenForm({ project_id: projectId ? String(projectId) : "", name: "", username: "", key_type: "ed25519" });
   };
 
   const openEdit = (c: Credential) => {
     setEdit(c);
-    setEditForm({ name: c.name, username: c.username ?? "", payload: "", become_same_as_ssh: c.become_same_as_ssh ?? false });
+    setEditForm({ name: c.name, username: c.username ?? "", payload: "", become_same_as_ssh: c.become_same_as_ssh });
   };
 
   const closeEdit = () => setEdit(undefined);
-  const valid = form.name.trim() && form.payload.trim();
+  const targetProjectId = projectId ?? Number(form.project_id);
+  const valid = (projectId ? true : !!form.project_id) && form.name.trim() && form.payload.trim();
 
   const saveEdit = () => {
     const body: Record<string, unknown> = { name: editForm.name, username: editForm.username };
     if (edit?.kind === "ssh_password") {
       body.become_same_as_ssh = editForm.become_same_as_ssh;
     }
-    if (editForm.payload.trim()) body.payload = editForm.payload;
+    if (editForm.payload.trim()) {
+      body.payload = editForm.payload;
+    }
     update.mutate(body, {
       onSuccess: () => {
         closeEdit();
@@ -84,18 +92,22 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
   };
 
   const handleGenerate = () => {
+    const genTargetProjectId = projectId ?? Number(genForm.project_id);
+    if (!genTargetProjectId) return;
     generate.mutate(
       {
-        project_id: projectId,
-        name: genForm.name.trim(),
-        username: genForm.username.trim() || undefined,
+        project_id: genTargetProjectId,
+        name: genForm.name,
+        username: genForm.username || undefined,
         key_type: genForm.key_type,
       },
       {
         onSuccess: (created) => {
           closeGen();
-          toast("SSH key generated");
-          setViewKey(created);
+          toast("Key generated");
+          if (created.public_key) {
+            setViewKey(created);
+          }
         },
       }
     );
@@ -103,8 +115,8 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
 
   const handleDeploy = (c: Credential) => {
     bootstrap.mutate(c.id, {
-      onSuccess: (data) => {
-        setDeploy({ playbookId: data.playbook_id, publicKey: data.public_key });
+      onSuccess: (res) => {
+        setDeploy({ playbookId: res.playbook_id, publicKey: c.public_key! });
       },
     });
   };
@@ -114,6 +126,11 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
     toast("Public key copied");
   };
 
+  const allRows = list.data ?? [];
+  const filteredRows = selectedProjectId
+    ? allRows.filter((r) => String(r.project_id) === selectedProjectId)
+    : allRows;
+
   return (
     <Section
       title="Credentials"
@@ -121,6 +138,16 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
       actions={
         canWrite && (
           <div className="flex gap-2">
+            {!projectId && (
+              <Select id="filter-project" label="Project" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
+                <option value="">All projects</option>
+                {projects.data?.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            )}
             <Button variant="secondary" icon={<KeyRound size={16} strokeWidth={1.5} />} onClick={() => setGenOpen(true)}>
               Generate SSH key
             </Button>
@@ -136,10 +163,11 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
       )}
 
       <DataTable<Credential>
-        rows={list.data ?? []}
+        rows={filteredRows}
         loading={list.isLoading}
-        empty={<EmptyState>No credentials yet for this project.</EmptyState>}
+        empty={<EmptyState>No credentials yet.</EmptyState>}
         columns={[
+          ...(!projectId ? [{ key: "project", header: "Project", render: (r: Credential) => projectName(r.project_id) }] : []),
           { key: "name", header: "Name", render: (r) => r.name },
           { key: "kind", header: "Kind", render: (r) => r.kind },
           { key: "username", header: "Username", render: (r) => r.username || "-" },
@@ -147,8 +175,9 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
           {
             key: "actions",
             header: "Actions",
-            render: (r) =>
-              canWrite && (
+            render: (r) => {
+              const canEditThis = projectId ? canWrite : canInProject(r.project_id, "credential.write");
+              return canEditThis ? (
                 <div className="flex gap-2">
                   {r.kind === "ssh_key" && (
                     <>
@@ -181,7 +210,8 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
                     Delete
                   </Button>
                 </div>
-              ),
+              ) : null;
+            },
           },
         ]}
       />
@@ -201,7 +231,7 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
               loading={create.isPending}
               onClick={() =>
                 create.mutate(
-                  { ...form, project_id: projectId },
+                  { ...form, project_id: targetProjectId },
                   {
                     onSuccess: () => {
                       close();
@@ -217,6 +247,16 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
         }
       >
         <div className="grid gap-3">
+          {!projectId && (
+            <Select id="credential-project" label="Project" value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+              <option value="">Select project</option>
+              {projects.data?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <TextInput ref={first} id="credential-name" label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Select
             id="credential-kind"
@@ -260,13 +300,23 @@ export function CredentialsPanel({ projectId }: { projectId: number }) {
             <Button variant="secondary" onClick={closeGen}>
               Cancel
             </Button>
-            <Button disabled={!genForm.name.trim()} loading={generate.isPending} onClick={handleGenerate}>
+            <Button disabled={!genForm.name.trim() || (!projectId && !genForm.project_id)} loading={generate.isPending} onClick={handleGenerate}>
               Generate
             </Button>
           </div>
         }
       >
         <div className="grid gap-3">
+          {!projectId && (
+            <Select id="gen-credential-project" label="Project" value={genForm.project_id} onChange={(e) => setGenForm({ ...genForm, project_id: e.target.value })}>
+              <option value="">Select project</option>
+              {projects.data?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <TextInput
             ref={genFirst}
             id="gen-credential-name"

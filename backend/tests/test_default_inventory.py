@@ -1,8 +1,8 @@
 import pytest
-from app.core.config import settings
-from app.db.models import Project, Playbook, Inventory, InventoryFormat
-from app.services.content import ensure_inventory_repo, init_project_repo
 from test_content_api import login
+
+from app.core.config import settings
+from app.services.content import ensure_inventory_repo
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -102,7 +102,7 @@ async def test_launch_without_inventory_uses_project_default(client, db, monkeyp
 
     job_detail = (await client.get(f"/api/jobs/{job_id}")).json()
     assert job_detail["inventory_id"] == inv_id
-    assert job_detail["params_snapshot"]["inventory_rel_path"] == f"inventories/launch-proj/def.yml"
+    assert job_detail["params_snapshot"]["inventory_rel_path"] == "inventories/launch-proj/def.yml"
 
 
 @pytest.mark.asyncio(loop_scope="session")

@@ -1,8 +1,9 @@
 from sqlalchemy import select
-from app.db.session import AsyncSessionLocal
-from app.db.models import User, Role
-from app.core.security import hash_password
+
 from app.core.config import settings
+from app.core.security import hash_password
+from app.db.models import Role, User
+from app.db.session import AsyncSessionLocal
 
 ROLES = ["admin", "user", "auditor"]
 

@@ -35,8 +35,15 @@ export interface CommitInfo { sha:string; message:string; author_user_id?:number
 export interface AuditItem { id:number; actor_user_id?:number|null; action:string; object_type?:string|null; object_id?:string|null; detail?:Record<string,unknown>|null; ip?:string|null; created_at?:string|null }
 export type PipelineStatus = "pending_approval" | "queued" | "running" | "successful" | "failed" | "canceled";
 export interface PipelineStepInput { template_id:number; requires_approval:boolean; continue_on_failure:boolean }
-export interface PipelineStep extends PipelineStepInput { position:number }
 export interface Pipeline { id:number; project_id:number; name:string; description?:string|null; enabled:boolean; created_by:number; created_at?:string|null }
-export interface PipelineDetail extends Pipeline { steps:{id:number; position:number; template_id:number; template_name:string; requires_approval:boolean; continue_on_failure:boolean}[] }
 export interface PipelineRun { id:number; pipeline_id:number|null; status:PipelineStatus; requested_by:number; current_position:number; created_at?:string|null; started_at?:string|null; finished_at?:string|null }
 export interface PipelineRunDetail extends PipelineRun { steps:{position:number; template_name:string; job_run_id?:number|null; status:JobStatus|"pending"}[] }
+
+export function parseExtra(v: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(v);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
