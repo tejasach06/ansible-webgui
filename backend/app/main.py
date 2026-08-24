@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
+from app.core.config import settings
 from app.api import (
     audit,
     auth,
@@ -63,3 +66,19 @@ async def generic_exception_handler(_request: Request, exc: Exception):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+_static_root = Path(settings.STATIC_ROOT)
+_index_file = _static_root / "index.html"
+
+if _static_root.is_dir():
+    app.mount("/assets", StaticFiles(directory=_static_root / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Not Found"})
+        candidate = (_static_root / full_path).resolve()
+        if full_path and candidate.is_file() and _static_root.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(_index_file, headers={"Cache-Control": "no-store, must-revalidate"})

@@ -3,7 +3,7 @@
 Self-hosted web UI for running Ansible playbooks: git-backed content editing, RBAC,
 approval-gated job runs, live log streaming, scheduling, and an audit trail.
 
-Stack: FastAPI + Celery + PostgreSQL + Redis, React 18 + Vite, served behind nginx.
+Stack: FastAPI + Celery + PostgreSQL + Redis, React 18 + Vite (API serves the built frontend on a single port).
 
 ## Quickstart
 
@@ -13,7 +13,7 @@ podman compose up -d --build
 podman compose --profile test run --rm tests
 ```
 
-UI: http://localhost:8080 — API docs: http://localhost:8000/api/docs
+UI: http://127.0.0.1:8080 — API docs: http://127.0.0.1:8080/api/docs (configurable via WEBGUI_HOST and WEBGUI_PORT)
 
 ## Documentation
 

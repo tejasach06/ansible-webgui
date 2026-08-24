@@ -12,7 +12,7 @@ import { EmptyState } from "./EmptyState";
 
 export function MembersPanel({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
-  const { canInProject } = useAuth();
+  const { user, canInProject } = useAuth();
   const canAdmin = canInProject(projectId, "project.admin");
 
   const [newUserId, setNewUserId] = useState("");
@@ -29,8 +29,9 @@ export function MembersPanel({ projectId }: { projectId: number }) {
         method: "PUT",
         body: JSON.stringify({ role }),
       }),
-    onSuccess: () => {
+    onSuccess: (_d, { userId }) => {
       queryClient.invalidateQueries({ queryKey: ["project_members", projectId] });
+      if (userId === user?.id) queryClient.invalidateQueries({ queryKey: ["me"] });
       setNewUserId("");
     },
   });
@@ -38,8 +39,9 @@ export function MembersPanel({ projectId }: { projectId: number }) {
   const deleteMutation = useMutation({
     mutationFn: (userId: number) =>
       apiFetch(`/api/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
-    onSuccess: () => {
+    onSuccess: (_d, userId) => {
       queryClient.invalidateQueries({ queryKey: ["project_members", projectId] });
+      if (userId === user?.id) queryClient.invalidateQueries({ queryKey: ["me"] });
     },
   });
 

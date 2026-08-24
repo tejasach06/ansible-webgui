@@ -21,11 +21,19 @@ export function PipelineRunPage() {
   });
   const approve = useMutation({
     mutationFn: (jobId: number) => apiFetch(`/api/jobs/${jobId}/approve`, { method: "POST", body: JSON.stringify({ approval_note: "" }) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pipeline-run", runId] }),
+    onSuccess: (_data, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ["pipeline-run", runId] });
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["job", jobId] });
+    },
   });
   const cancel = useMutation({
     mutationFn: () => apiFetch(`/api/pipelines/runs/${runId}/cancel`, { method: "POST" }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pipeline-run", runId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pipeline-run", runId] });
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["job"] });
+    },
   });
 
   const data = run.data;

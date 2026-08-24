@@ -29,7 +29,7 @@ The Ansible WebGUI frontend is a TypeScript-based single-page application built 
 
 ## Containerized Deployment
 
-In the containerized setup, the frontend is built and served by Nginx. The production build process is handled by the `Containerfile.web` and the Nginx configuration is defined in `nginx.conf`.
+In the containerized setup, the frontend is built by the `web` stage in `Containerfile.backend` and served by FastAPI from `STATIC_ROOT` (`/app/static`).
 
 ## Cross-links
 

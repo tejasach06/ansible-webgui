@@ -25,9 +25,9 @@ services:
     build:
       context: .
       dockerfile: Containerfile.backend
-    command: sh -c "until pg_isready -h postgres -U ${POSTGRES_USER:-ansible} -d ${POSTGRES_DB:-ansible_webgui}; do sleep 1; done && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "until pg_isready -h postgres -U ${POSTGRES_USER:-ansible} -d ${POSTGRES_DB:-ansible_webgui}; do sleep 1; done && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=${WEBGUI_TRUSTED_PROXIES:-127.0.0.1}"
     ports:
-      - "8000:8000"
+      - "${WEBGUI_HOST:-127.0.0.1}:${WEBGUI_PORT:-8080}:8000"
     env_file: .env
     volumes:
       - content:/data/content
@@ -64,14 +64,6 @@ services:
       - postgres
       - redis
 
-  web:
-    build:
-      context: .
-      dockerfile: Containerfile.web
-    ports:
-      - "8080:80"
-    depends_on:
-      - api
 
   tests:
     profiles: ["test"]

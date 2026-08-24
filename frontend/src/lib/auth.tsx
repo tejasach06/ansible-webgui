@@ -33,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       logout: async () => {
         await apiFetch("/api/auth/logout", { method: "POST" });
+        queryClient.resetQueries({ queryKey: ["me"] });
         queryClient.clear();
       },
       can,

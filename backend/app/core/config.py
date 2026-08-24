@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     CONTENT_ROOT: str = "/data/content"
     ARTIFACT_ROOT: str = "/data/artifacts"
     INVENTORY_REPO_NAME: str = "_inventory"
+    STATIC_ROOT: str = "/app/static"
 
     @property
     def DATABASE_URL(self) -> str:

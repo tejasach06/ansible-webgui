@@ -19,6 +19,9 @@ This guide details all environment variables required by the Ansible WebGUI stac
 | `COOKIE_SECURE` | `false` | Secure cookie flag (set `true` for TLS) | No (see Security) |
 | `CONTENT_ROOT` | `/data/content` | Content root directory | No |
 | `ARTIFACT_ROOT` | `/data/artifacts` | Runner artifact directory | No |
+| `WEBGUI_HOST` | `127.0.0.1` | Host interface the WebGUI is published on (`0.0.0.0` to expose on all interfaces) | No |
+| `WEBGUI_PORT` | `8080` | Host port serving the UI and `/api` | No |
+| `WEBGUI_TRUSTED_PROXIES` | `127.0.0.1` | IPs whose `X-Forwarded-*` headers uvicorn trusts | No |
 
 ## Security Notes
 

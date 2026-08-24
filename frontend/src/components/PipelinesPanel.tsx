@@ -52,7 +52,11 @@ export function PipelinesPanel({ projectId }: { projectId: number }) {
   const runMutation = useMutation({
     mutationFn: (pipelineId: number) =>
       apiFetch<{ id: number }>(`/api/pipelines/${pipelineId}/run`, { method: "POST" }),
-    onSuccess: (data) => navigate(`/pipelines/runs/${data.id}`),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["pipelines", projectId] });
+      navigate(`/pipelines/runs/${data.id}`);
+    },
   });
 
   const deleteMutation = useMutation({

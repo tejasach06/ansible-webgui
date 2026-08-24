@@ -6,8 +6,7 @@ Ansible WebGUI is a multi-container stack orchestrated via `podman compose`.
 
 ```mermaid
 graph LR
-    User((Browser)) -->|:8080| Web[Nginx]
-    Web -->|:8000| API[FastAPI API]
+    User((Browser)) -->|WEBGUI_PORT| API[FastAPI API + SPA]
     API -->|SSE/Broker| Redis[(Redis)]
     API <-->|SQL| Postgres[(PostgreSQL)]
     Worker[Celery Worker] <-->|SQL| Postgres
@@ -17,8 +16,7 @@ graph LR
     API -.->|Content/Artifacts| Volumes
 ```
 
-*   **web**: Nginx proxy serving built frontend assets and proxying API calls to the backend.
-*   **api**: FastAPI application; entry point for the browser.
+*   **api**: FastAPI application; serves the built frontend and the API; entry point for the browser.
 *   **worker**: Celery worker executing Ansible playbooks.
 *   **beat**: Celery Beat scheduler for recurring tasks.
 *   **postgres**: Database for state and audit logs.
@@ -26,7 +24,7 @@ graph LR
 
 ## Request Path
 
-1.  **Browser to API**: The browser calls the Nginx proxy on `:8080`, which forwards API requests to FastAPI on `:8000`. Authentication uses HttpOnly JWT cookies.
+1.  **Browser to API**: The browser calls FastAPI directly on the published port (`WEBGUI_PORT`). An external reverse proxy, if used, is operator-managed and outside this repo scope. Authentication uses HttpOnly JWT cookies.
 2.  **CSRF Protection**: Mutating requests (POST, PUT, DELETE) must carry the `X-Requested-With: XMLHttpRequest` header.
 3.  **Error Handling**: The API wraps all errors in an envelope defined in `app/main.py`:
     ```json
