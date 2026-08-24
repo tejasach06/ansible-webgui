@@ -16,6 +16,7 @@ import { TaskTree } from "../components/TaskTree";
 import { HostMatrix } from "../components/HostMatrix";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { linkClass } from "../lib/cn";
+import { KeyValueTable } from "../components/KeyValueTable";
 
 function JobLogTerminal({ jobId, status, rc, jumpCounter }: { jobId: number; status?: string; rc?: number | null; jumpCounter?: number | null }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -125,8 +126,8 @@ export function JobDetailPage() {
       <Tabs tabs={["output", "report", "params"] as const} value={tab} onChange={setTab} labels={{ output: "Output", report: "Report", params: "Params" }} />
       {tab === "report" && firstFailure && <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => jumpToOutput(firstFailure)}>Jump to first failure</Button></div>}
       {tab === "output" && <JobLogTerminal jobId={id} status={data?.status} rc={data?.rc} jumpCounter={jump} />}
-      {tab === "report" && <div className="grid gap-4">{data?.stats && <table className="w-full rounded-lg border border-zinc-200 text-sm dark:border-zinc-800"><tbody>{Object.entries(data.stats).map(([key, value]) => <tr key={key} className="border-b border-zinc-200 dark:border-zinc-800"><th className="px-3 py-2 text-left">{key}</th><td className="px-3 py-2"><pre>{JSON.stringify(value)}</pre></td></tr>)}</tbody></table>}<HostMatrix data={report.data} onJump={jumpToOutput} /><TaskTree data={report.data} onJump={jumpToOutput} /></div>}
-      {tab === "params" && <pre className="overflow-auto rounded-lg bg-zinc-50 p-4 text-xs dark:bg-zinc-900">{JSON.stringify(snapshot, null, 2)}</pre>}
+      {tab === "report" && <div className="grid gap-4"><HostMatrix data={report.data} onJump={jumpToOutput} /><TaskTree data={report.data} onJump={jumpToOutput} /></div>}
+      {tab === "params" && <KeyValueTable data={snapshot} empty="No launch parameters recorded." />}
       <Dialog open={approval} onClose={() => { setApproval(false); setNote(""); }} title="Approve run"><TextInput id="note" label="Approval note" value={note} onChange={(event) => setNote(event.target.value)} /><div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={() => setApproval(false)}>Cancel</Button><Button disabled={!note.trim()} loading={approve.isPending} onClick={() => approve.mutate({ approval_note: note.trim() }, { onSuccess: () => { setApproval(false); setNote(""); } })}>Approve</Button></div></Dialog>
       <ConfirmDialog open={!!confirm} title={confirm === "reject" ? "Reject job?" : confirm === "cancel" ? "Cancel job?" : confirm === "failed" ? "Relaunch failed hosts?" : "Relaunch job?"} name={confirm === "failed" ? `${failedHosts.join(",")} @ ${String(snapshot.git_sha ?? "").slice(0, 8)}` : `job ${id}`} onClose={() => setConfirm(null)} onConfirm={() => { if (confirm === "reject") reject.mutate(undefined, { onSuccess: () => setConfirm(null) }); if (confirm === "cancel") cancel.mutate(undefined, { onSuccess: () => setConfirm(null) }); if (confirm === "relaunch") relaunch.mutate({ hosts: "all" }, { onSuccess: (result) => navigate(`/jobs/${result.id}`) }); if (confirm === "failed") relaunch.mutate({ hosts: "failed" }, { onSuccess: (result) => navigate(`/jobs/${result.id}`) }); }} />
     </section>

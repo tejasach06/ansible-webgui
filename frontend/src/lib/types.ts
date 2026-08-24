@@ -32,7 +32,7 @@ export interface FileEntry { rel_path:string; name:string; type:"dir"|"file"; si
 export interface TreeResponse { entries:FileEntry[]; truncated:boolean }
 export interface FileContent { rel_path:string; content:string; is_vault:boolean; sha:string }
 export interface CommitInfo { sha:string; message:string; author_user_id?:number|null; files_changed:string[]; created_at?:string|null }
-export interface AuditItem { id:number; actor_user_id?:number|null; action:string; object_type?:string|null; object_id?:string|null; detail?:Record<string,unknown>|null; ip?:string|null; created_at?:string|null }
+export interface AuditItem { id:number; actor_user_id?:number|null; actor_username?:string|null; actor_email?:string|null; action:string; object_type?:string|null; object_id?:string|null; detail?:Record<string,unknown>|null; ip?:string|null; created_at?:string|null }
 export type PipelineStatus = "pending_approval" | "queued" | "running" | "successful" | "failed" | "canceled";
 export interface PipelineStepInput { template_id:number; requires_approval:boolean; continue_on_failure:boolean }
 export interface Pipeline { id:number; project_id:number; name:string; description?:string|null; enabled:boolean; created_by:number; created_at?:string|null }

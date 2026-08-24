@@ -78,3 +78,45 @@ async def test_audit_filters_by_action(client, db):
     body = res.json()
     assert body["total"] == 1
     assert body["items"][0]["action"] == "tree_a"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_audit_includes_actor_details_and_actor_filter(client, db):
+    admin_user = (await db.execute(select(User).where(User.username == "admin"))).unique().scalar_one()
+    user_role = (await db.execute(select(Role).where(Role.name == "user"))).scalar_one()
+    test_actor = User(username="audit-actor", email="audit-actor@example.com", password_hash=hash_password("changeme"), roles=[user_role])
+    db.add(test_actor)
+    await db.commit()
+    await db.refresh(test_actor)
+
+    db.add_all([
+        AuditLog(action="custom_action_1", actor_user_id=test_actor.id, object_type="inventory", object_id="10"),
+        AuditLog(action="custom_action_2", actor_user_id=None, object_type="system", object_id="0"),
+        AuditLog(action="custom_action_3", actor_user_id=admin_user.id, object_type="project", object_id="1"),
+    ])
+    await db.commit()
+
+    await login(client)
+    # Query without filter: verify actor details populated
+    res = await client.get("/api/audit?action=custom_action_1")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total"] == 1
+    assert body["items"][0]["actor_user_id"] == test_actor.id
+    assert body["items"][0]["actor_username"] == "audit-actor"
+    assert body["items"][0]["actor_email"] == "audit-actor@example.com"
+
+    # Query system action (null actor_user_id)
+    res_sys = await client.get("/api/audit?action=custom_action_2")
+    assert res_sys.status_code == 200
+    body_sys = res_sys.json()
+    assert body_sys["total"] == 1
+    assert body_sys["items"][0]["actor_user_id"] is None
+    assert body_sys["items"][0]["actor_username"] is None
+    assert body_sys["items"][0]["actor_email"] is None
+
+    # Filter by actor username
+    res_actor_filter = await client.get("/api/audit?actor=audit-actor")
+    assert res_actor_filter.status_code == 200
+    assert any(i["action"] == "custom_action_1" for i in res_actor_filter.json()["items"])
+    assert not any(i["action"] == "custom_action_3" for i in res_actor_filter.json()["items"])

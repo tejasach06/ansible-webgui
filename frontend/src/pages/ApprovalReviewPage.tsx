@@ -11,6 +11,7 @@ import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { linkClass } from "../lib/cn";
+import { KeyValueTable } from "../components/KeyValueTable";
 
 export function ApprovalReviewPage() {
   const id = Number(useParams().jobId);
@@ -121,13 +122,7 @@ export function ApprovalReviewPage() {
       </Section>
 
       <Section title="Extra vars">
-        {snap.extra_vars && typeof snap.extra_vars === "object" && Object.keys(snap.extra_vars).length > 0 ? (
-          <pre className="overflow-auto rounded-lg bg-zinc-50 p-4 text-xs dark:bg-zinc-900">
-            {JSON.stringify(snap.extra_vars, null, 2)}
-          </pre>
-        ) : (
-          <p className="text-sm text-zinc-500">No extra vars.</p>
-        )}
+        <KeyValueTable data={snap.extra_vars as Record<string, unknown> | null | undefined} empty="No extra vars." />
       </Section>
 
       <Section title="Credentials">

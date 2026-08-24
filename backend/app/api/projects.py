@@ -1,16 +1,23 @@
 import re
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException
+from git import Actor, Repo
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import require, require_project
 from app.core.config import settings
-from app.db.models import Inventory, JobRun, JobStatus, Playbook, Project, ProjectMembership, ProjectRole, User
+from app.db.models import Commit, Inventory, JobRun, JobStatus, Playbook, Project, ProjectMembership, ProjectRole, User
 from app.db.session import get_db
 from app.services.audit import audit
-from app.services.content import get_project_repo_path, init_project_repo
+from app.services.content import (
+    ensure_inventory_repo,
+    get_inventory_repo_path,
+    get_project_repo_path,
+    init_project_repo,
+)
 from app.services.rbac_scope import inventory_visible_to_project, role_name, visible_project_ids
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -117,11 +124,30 @@ async def update_project(
         new = get_project_repo_path(req.name)
         if new.exists():
             raise HTTPException(status_code=409, detail={"code": "path_exists", "message": "Target repo directory already exists"})
+
+        invs = (await db.execute(select(Inventory).where(Inventory.project_id == project_id))).scalars().all()
+        inv_repo = get_inventory_repo_path()
+        old_dir = inv_repo / "inventories" / old_name
+        new_dir = inv_repo / "inventories" / req.name
+        if invs and new_dir.exists():
+            raise HTTPException(status_code=409, detail={"code": "path_exists", "message": "Target inventory directory already exists"})
+
         try:
             if old.exists():
                 old.rename(new)
+            if invs and old_dir.exists():
+                repo = Repo(inv_repo)
+                await anyio.to_thread.run_sync(lambda: repo.git.mv(f"inventories/{old_name}", f"inventories/{req.name}"))
+                actor = Actor(user.username, user.email)
+                commit = await anyio.to_thread.run_sync(lambda: repo.index.commit(f"Rename inventory directory {old_name} -> {req.name}", author=actor, committer=actor))
+                inv_proj = await ensure_inventory_repo(db)
+                db.add(Commit(project_id=inv_proj.id, sha=commit.hexsha, author_user_id=user.id, message=f"Rename inventory directory {old_name} -> {req.name}", files_changed=[f"inventories/{req.name}"]))
         except OSError as exc:
             raise HTTPException(status_code=500, detail={"code": "rename_failed", "message": str(exc)}) from exc
+
+        for inv in invs:
+            inv.rel_path = f"inventories/{req.name}/{inv.rel_path.split('/', 2)[2]}"
+
         p.name = req.name
         p.git_path = str(new)
     if req.default_branch is not None:
@@ -195,7 +221,7 @@ async def upsert_member(
     user: User = Depends(require_project("project.admin")),
     db: AsyncSession = Depends(get_db)
 ):
-    target_user = (await db.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    target_user = (await db.execute(select(User).where(User.id == target_user_id))).unique().scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail={"code": "user_not_found", "message": "User not found"})
 

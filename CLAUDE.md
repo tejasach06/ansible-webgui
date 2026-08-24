@@ -137,3 +137,21 @@ rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 
 Overall average: **60-90% token reduction** on common development operations.
 <!-- /rtk-instructions -->
+
+## Codebase questions: query the graph first
+
+`graphify-out/graph.json` exists in this repo. For ANY question about this
+codebase (architecture, "what calls X", "where is Y handled", data flow,
+file relationships), run this BEFORE grep/read:
+
+    graphify query "<the question>"
+
+Narrow noisy results with `--budget 1500` or a specific symbol
+(`graphify explain "<Symbol>"`, `graphify path "<A>" "<B>"`).
+Only fall back to grep/read when the graph answer is empty or the file
+in question is newer than `graphify-out/manifest.json`.
+Rebuild stale graph: `graphify . --update`.
+
+When delegating codebase exploration to a subagent, include the
+`graphify query` instruction in the subagent's task text — subagents start
+with no skills loaded and will otherwise grep the whole tree.

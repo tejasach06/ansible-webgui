@@ -7,6 +7,7 @@ import { useAuth } from "../lib/auth";
 import { useTheme } from "../lib/theme";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
+import { PageHeader } from "./PageHeader";
 import { DataTable } from "./DataTable";
 import { Drawer } from "./Drawer";
 import { Dialog } from "./Dialog";
@@ -21,6 +22,7 @@ import type { Inventory, InventoryFormat } from "../lib/types";
 
 export function InventoriesPanel({ projectId }: { projectId?: number }) {
   const { canInventoryWrite, canInProject } = useAuth();
+  const canWriteInv = (inv: Inventory) => inv.project_id ? canInProject(inv.project_id, "content.write") : canInventoryWrite;
   const { toast } = useToast();
   const { effectiveTheme } = useTheme();
   const list = useInventories(projectId);
@@ -80,13 +82,14 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
   const saveInvInvalid = saveApiError?.code === "inventory_invalid" ? String(saveApiError.detail?.stderr ?? saveApiError.detail?.message ?? "") : "";
   const createInvInvalid = createApiError?.code === "inventory_invalid" ? String(createApiError.detail?.stderr ?? createApiError.detail?.message ?? "") : "";
   const createYamlError = createApiError?.code === "invalid_yaml" ? String(createApiError.detail?.stderr ?? "") : "";
+  const createBadExt = createApiError?.code === "bad_extension" ? String(createApiError.detail?.message ?? "") : "";
   const missing = (file.error as ApiError | undefined)?.code === "file_not_found";
   const dirty = !!file.data && content !== file.data.content;
   const requestClose = () => { if (dirty) setConfirmDiscard(true); else closeEdit(); };
   const onCancelEdit = (e: SyntheticEvent<HTMLDialogElement>) => { if (dirty) { e.preventDefault(); setConfirmDiscard(true); } };
 
   const commit = () => {
-    if (!canInventoryWrite || !dirty || saveFile.isPending) return;
+    if (!edit || !canWriteInv(edit) || !dirty || saveFile.isPending) return;
     saveFile.mutate({ content, message, base_sha: file.data?.sha }, {
       onSuccess: r => {
         toast(`Committed ${r.sha.slice(0, 8)}`);
@@ -117,15 +120,18 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
     setWizardValid(nextValid);
   }, []);
 
-  const createBody = () => ({
-    name: form.name,
-    filename: form.filename,
-    format: form.format,
-    project_id: scope ? Number(scope) : null,
-    content: mode === "hosts" ? wizardContent : form.content,
-    message: `Create inventory ${form.name}`,
-  });
-
+  const createBody = () => {
+    const fn = form.filename.trim();
+    const filename = form.format === "yaml" && !/\.(ya?ml)$/i.test(fn) && !fn.includes(".") ? `${fn}.yml` : fn;
+    return {
+      name: form.name,
+      filename,
+      format: form.format,
+      project_id: scope ? Number(scope) : null,
+      content: mode === "hosts" ? wizardContent : form.content,
+      message: `Create inventory ${form.name}`,
+    };
+  };
   const runVerify = () => {
     setVerifyError(null);
     setVerifyResult(null);
@@ -168,19 +174,39 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
           </Select>
         </div>
       )}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Inventories</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {projectId ? "Host inventories available to this project." : "Inventories are shared across all projects or owned by one."}
-          </p>
-        </div>
-        {canInventoryWrite && (
-          <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={openCreate}>
+      {!projectId ? (
+        <PageHeader
+          title="Inventories"
+          subtitle="Host inventories, shared across projects or owned by one."
+          actions={
+            <Button
+              icon={<Plus size={16} strokeWidth={1.5} />}
+              variant={canInventoryWrite ? "primary" : "secondary"}
+              aria-disabled={!canInventoryWrite}
+              onClick={canInventoryWrite ? openCreate : () => toast("You need inventory write access: a system admin role, or owner/maintainer/developer membership in a project.")}
+            >
+              Register inventory
+            </Button>
+          }
+        />
+      ) : (
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Inventories</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Host inventories available to this project.
+            </p>
+          </div>
+          <Button
+            icon={<Plus size={16} strokeWidth={1.5} />}
+            variant={canInventoryWrite ? "primary" : "secondary"}
+            aria-disabled={!canInventoryWrite}
+            onClick={canInventoryWrite ? openCreate : () => toast("You need inventory write access: a system admin role, or owner/maintainer/developer membership in a project.")}
+          >
             Register inventory
           </Button>
-        )}
-      </div>
+        </div>
+      )}
       {(list.error || create.error || del.error || update.error || updateProject.error) && (
         <ErrorBanner error={list.error || create.error || del.error || update.error || updateProject.error} />
       )}
@@ -209,7 +235,7 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
                 <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEdit(r)}>
                   Edit
                 </Button>
-                {canInventoryWrite && (
+                {canWriteInv(r) && (
                   <Button size="sm" variant="danger" onClick={() => setTarget(r)}>
                     Delete
                   </Button>
@@ -245,15 +271,16 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
             onChange={e => setScope(e.target.value)}
           >
             <option value="">Shared (all projects)</option>
-            {projectId && <option value={String(projectId)}>{currentProject?.name ?? `Project #${projectId}`}</option>}
+            {projectId && canInProject(projectId, "content.write") && <option value={String(projectId)}>{currentProject?.name ?? `Project #${projectId}`}</option>}
           </Select>
           <TextInput ref={first} id="inventory-name" label="Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-          <TextInput id="inventory-filename" label="File name" value={form.filename} onChange={e => setForm({ ...form, filename: e.target.value })} />
+          <TextInput id="inventory-filename" label="File name" placeholder={form.format === "yaml" ? "hosts.yml" : "hosts.ini"} value={form.filename} onChange={e => setForm({ ...form, filename: e.target.value })} />
           <Select id="inventory-format" label="Format" value={form.format} onChange={e => setForm({ ...form, format: e.target.value as InventoryFormat })}>
             <option value="yaml">yaml</option>
             <option value="ini">ini</option>
           </Select>
           {createYamlError && <pre className="max-h-40 overflow-auto rounded-md bg-zinc-950 p-3 text-xs text-zinc-100 dark:bg-zinc-900">{createYamlError}</pre>}
+          {createBadExt && <pre className="max-h-40 overflow-auto rounded-md bg-zinc-950 p-3 text-xs text-zinc-100 dark:bg-zinc-900">{createBadExt}</pre>}
           {createInvInvalid && <pre className="max-h-40 overflow-auto rounded-md bg-zinc-950 p-3 text-xs text-zinc-100 dark:bg-zinc-900">{createInvInvalid}</pre>}
           {mode === "hosts" ? <InventoryHostsWizard format={form.format} onChange={onWizardChange} /> : <TextArea id="inventory-content" label="Content" value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} />}
         </div>
@@ -269,7 +296,7 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
                 <option value="yaml">yaml</option>
                 <option value="ini">ini</option>
               </Select>
-              {canInventoryWrite && (
+              {edit && canWriteInv(edit) && (
                 <Button className="self-end" loading={update.isPending} onClick={() => update.mutate(editForm, { onSuccess: r => { setEdit(r); toast("Inventory updated"); } })}>
                   Save metadata
                 </Button>
@@ -278,7 +305,7 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
             <div className="flex items-center justify-between">
               <div className="text-sm font-mono text-zinc-600 dark:text-zinc-400">{edit?.rel_path}</div>
               <div className="flex gap-2">
-                {canInventoryWrite && (
+                {edit && canWriteInv(edit) && (
                   <Button size="sm" variant="secondary" icon={<CheckCircle2 size={14} />} loading={verify.isPending} onClick={runVerify}>
                     Verify
                   </Button>
@@ -326,13 +353,13 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
               theme={effectiveTheme === "dark" ? "vs-dark" : "light"}
               value={content}
               onChange={v => setContent(v ?? "")}
-              options={playbookEditorOptions(!canInventoryWrite)}
+              options={playbookEditorOptions(edit ? !canWriteInv(edit) : true)}
             />
           </div>
           <div className="grid shrink-0 gap-3">
             <div className="flex flex-wrap gap-2">
               <TextInput id="inventory-commit-message" label="Commit message" value={message} onChange={e => setMessage(e.target.value)} />
-              {canInventoryWrite && (
+              {edit && canWriteInv(edit) && (
                 <Button loading={saveFile.isPending} disabled={!dirty} onClick={commit}>
                   Save and commit
                 </Button>

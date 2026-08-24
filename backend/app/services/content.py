@@ -155,8 +155,10 @@ def verify_inventory_file(file_path: pathlib.Path) -> dict:
             cwd=file_path.parent,
             env={
                 "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "HOME": os.environ.get("HOME", "/tmp"),
                 "ANSIBLE_INVENTORY_ENABLED": INVENTORY_PLUGIN_ALLOWLIST,
                 "ANSIBLE_INVENTORY_ANY_UNPARSED_IS_FAILED": "True",
+                **({"ANSIBLE_COLLECTIONS_PATH": os.environ["ANSIBLE_COLLECTIONS_PATH"]} if "ANSIBLE_COLLECTIONS_PATH" in os.environ else {}),
             },
         )
     except subprocess.TimeoutExpired:

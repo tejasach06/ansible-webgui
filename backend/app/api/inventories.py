@@ -1,3 +1,5 @@
+import pathlib
+
 import anyio
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,7 +18,7 @@ from app.services.content import (
     validate_safe_path,
     verify_inventory_file,
 )
-from app.services.rbac_scope import assert_project_perm, has_inventory_write
+from app.services.rbac_scope import assert_project_perm, has_inventory_write, visible_project_ids
 
 router = APIRouter(prefix="/api/inventories", tags=["inventories"])
 INVENTORY_DIR = "inventories"
@@ -53,16 +55,23 @@ def _inventory_response(inv: Inventory):
     return {"id": inv.id, "rel_path": inv.rel_path, "name": inv.name, "format": inv.format, "project_id": inv.project_id}
 
 
-def _inventory_rel_path(filename: str, project_name: str | None = None) -> str:
+def _inventory_rel_path(filename: str, fmt: InventoryFormat, project_name: str | None = None) -> str:
     fn = filename.strip()
     if not fn or "/" in fn or "\\" in fn or fn.startswith(".") or fn in {".", ".."}:
         raise HTTPException(status_code=400, detail={"code": "bad_path", "message": "Filename must be a plain file name inside inventories/, with no path separators"})
     if fn.endswith((".py", ".sh")):
         raise HTTPException(status_code=400, detail={"code": "executable_inventory_forbidden", "message": "Executable inventories forbidden"})
+    suffix = pathlib.PurePosixPath(fn).suffix.lower()
+    if fmt == InventoryFormat.yaml:
+        if not suffix:
+            fn = f"{fn}.yml"
+        elif suffix not in {".yml", ".yaml"}:
+            raise HTTPException(status_code=400, detail={"code": "bad_extension", "message": "YAML inventories must use a .yml or .yaml file name"})
+    elif suffix not in {"", ".ini"}:
+        raise HTTPException(status_code=400, detail={"code": "bad_extension", "message": "INI inventories must use a .ini file name or no extension"})
     if project_name:
         return f"{INVENTORY_DIR}/{project_name}/{fn}"
     return f"{INVENTORY_DIR}/{fn}"
-
 
 async def _ensure_inventory_write(db: AsyncSession, user: User) -> None:
     if not await has_inventory_write(db, user):
@@ -72,9 +81,10 @@ async def _ensure_inventory_write(db: AsyncSession, user: User) -> None:
 @router.get("")
 async def list_inventories(
     request: Request,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    vids = await visible_project_ids(db, user)
     stmt = select(Inventory)
     if "project_id" in request.query_params:
         pid_str = request.query_params["project_id"]
@@ -82,11 +92,14 @@ async def list_inventories(
             pid = int(pid_str)
         except ValueError:
             raise HTTPException(status_code=422, detail={"code": "bad_query", "message": "project_id must be an integer"}) from None
+        if vids is not None and pid not in vids:
+            raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Insufficient project permission"})
         stmt = stmt.where(or_(Inventory.project_id.is_(None), Inventory.project_id == pid))
+    elif vids is not None:
+        stmt = stmt.where(or_(Inventory.project_id.is_(None), Inventory.project_id.in_(vids)))
 
     invs = (await db.execute(stmt)).scalars().all()
     return [_inventory_response(inv) for inv in invs]
-
 
 @router.post("")
 async def register_inventory(
@@ -105,7 +118,7 @@ async def register_inventory(
     else:
         await _ensure_inventory_write(db, user)
 
-    rel_path = _inventory_rel_path(req.filename, project_name)
+    rel_path = _inventory_rel_path(req.filename, req.format, project_name)
     repo_path = get_inventory_repo_path()
     if not (repo_path / ".git").exists():
         raise HTTPException(status_code=404, detail={"code": "inventory_repo_missing", "message": "Shared inventory repo is not initialized. Restart the API."})
@@ -159,11 +172,13 @@ async def register_inventory(
 @router.get("/{inventory_id}/file")
 async def get_inventory_file(
     inventory_id: int,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     from git import Repo
     inv = await _load_inventory(db, inventory_id)
+    if inv.project_id is not None:
+        await assert_project_perm(db, user, inv.project_id, "read")
     repo_path = get_inventory_repo_path()
     try:
         file_path = validate_safe_path(repo_path, inv.rel_path)
@@ -256,7 +271,13 @@ async def update_inventory(
         if duplicate:
             raise HTTPException(status_code=400, detail={"code": "name_exists", "message": "Inventory name or path already registered"})
         inv.name = req.name
-    if req.format is not None:
+    if req.format is not None and req.format != inv.format:
+        suffix = pathlib.PurePosixPath(inv.rel_path).suffix.lower()
+        if req.format == InventoryFormat.yaml:
+            if suffix not in {".yml", ".yaml"}:
+                raise HTTPException(status_code=400, detail={"code": "bad_extension", "message": "Cannot change format: file name extension does not match the new format"})
+        elif suffix not in {"", ".ini"}:
+            raise HTTPException(status_code=400, detail={"code": "bad_extension", "message": "Cannot change format: file name extension does not match the new format"})
         inv.format = req.format
     await db.commit()
     await db.refresh(inv)
