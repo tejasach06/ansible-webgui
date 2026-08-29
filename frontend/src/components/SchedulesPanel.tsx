@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { useSchedules, useCreateSchedules, useUpdateSchedules, useDeleteSchedules } from "../api/schedules";
 import { useTemplates } from "../api/templates";
@@ -32,10 +32,11 @@ export function SchedulesPanel({ projectId }: { projectId?: number }) {
   const [target, setTarget] = useState<Schedule>();
   const first = useRef<HTMLSelectElement>(null);
 
-  const tmplMap = new Map((templates.data ?? []).map((t) => [t.id, t.name]));
-  const displayedSchedules = projectId
-    ? (list.data ?? []).filter((s) => tmplMap.has(s.template_id))
-    : (list.data ?? []);
+  const tmplMap = useMemo(() => new Map((templates.data ?? []).map((t) => [t.id, t.name])), [templates.data]);
+  const displayedSchedules = useMemo(
+    () => (projectId ? (list.data ?? []).filter((s) => tmplMap.has(s.template_id)) : list.data ?? []),
+    [projectId, list.data, tmplMap]
+  );
 
   const close = () => {
     setOpen(false);

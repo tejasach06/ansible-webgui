@@ -9,6 +9,7 @@ import { TextInput, Select } from "./Field";
 import { DataTable } from "./DataTable";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyState } from "./EmptyState";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export function MembersPanel({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
@@ -18,6 +19,7 @@ export function MembersPanel({ projectId }: { projectId: number }) {
   const [newUserId, setNewUserId] = useState("");
   const [newRole, setNewRole] = useState<ProjectMember["role"]>("developer");
 
+  const [confirmDel, setConfirmDel] = useState<ProjectMember | null>(null);
   const { data: members, isLoading, error } = useQuery({
     queryKey: ["project_members", projectId],
     queryFn: () => apiFetch<ProjectMember[]>(`/api/projects/${projectId}/members`),
@@ -82,7 +84,7 @@ export function MembersPanel({ projectId }: { projectId: number }) {
             header: "Role",
             render: (m) =>
               canAdmin ? (
-                <select value={m.role} onChange={(e) => upsertMutation.mutate({ userId: m.user_id, role: e.target.value as ProjectMember["role"] })} className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
+                <select aria-label={`Project role for ${m.username ?? `user #${m.user_id}`}`} value={m.role} onChange={(e) => upsertMutation.mutate({ userId: m.user_id, role: e.target.value as ProjectMember["role"] })} className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
                   <option value="owner">Owner</option>
                   <option value="maintainer">Maintainer</option>
                   <option value="developer">Developer</option>
@@ -96,10 +98,11 @@ export function MembersPanel({ projectId }: { projectId: number }) {
           {
             key: "actions",
             header: "Actions",
-            render: (m) => canAdmin && <Button variant="danger" size="sm" onClick={() => deleteMutation.mutate(m.user_id)} loading={deleteMutation.isPending}>Remove</Button>,
+            render: (m) => canAdmin && <Button variant="danger" size="sm" onClick={() => setConfirmDel(m)} loading={deleteMutation.isPending}>Remove</Button>,
           },
         ]}
       />
+      <ConfirmDialog open={!!confirmDel} title="Remove project member?" name={confirmDel?.username ?? ""} loading={deleteMutation.isPending} onClose={() => setConfirmDel(null)} onConfirm={() => deleteMutation.mutate(confirmDel!.user_id, { onSuccess: () => setConfirmDel(null) })} />
     </Section>
   );
 }

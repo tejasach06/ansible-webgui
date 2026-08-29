@@ -26,6 +26,9 @@ class JobRequest(BaseModel):
 class ApproveRequest(BaseModel):
     approval_note: str | None = None
 
+class RejectRequest(BaseModel):
+    reason: str | None = None
+
 class RelaunchRequest(BaseModel):
     hosts: Literal["all", "failed"] = "all"
     mode: JobMode | None = None

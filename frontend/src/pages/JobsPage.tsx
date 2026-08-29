@@ -14,6 +14,7 @@ import { JobSourceDialog } from "../components/JobSourceDialog";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { StatusPill } from "../components/StatusPill";
+import { ModeBadge } from "../components/ModeBadge";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { linkClass } from "../lib/cn";
@@ -155,7 +156,7 @@ export function JobsPage() {
                 (r.inventory_name ?? "-")
               ),
           },
-          { key: "mode", header: "Mode", render: (r) => r.mode },
+          { key: "mode", header: "Mode", render: (r) => <ModeBadge mode={r.mode} /> },
           { key: "created", header: "Created", render: (r) => <span title={r.created_at ?? undefined}>{formatTimestamp(r.created_at)}</span> },
           {
             key: "actions",

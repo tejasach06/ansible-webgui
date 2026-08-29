@@ -143,7 +143,7 @@ export function ProjectsPage() {
     <Dialog open={open} size="full" onClose={close} title="Create project" initialFocusRef={first}>
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         <ol className="flex shrink-0 flex-wrap gap-2 text-sm">
-          {["Name", "First playbook", "Done"].map((label, index) => <li key={label} className={`rounded-full px-3 py-1 ${step === index ? "bg-sky-600 text-white dark:bg-sky-500 dark:text-white" : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"}`}>{index + 1}. {label}</li>)}
+          {["Name", "First playbook", "Done"].map((label, index) => <li key={label} className={`rounded-full px-3 py-1 ${step === index ? "bg-accent-solid text-accent-solid-fg" : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"}`}>{index + 1}. {label}</li>)}
         </ol>
         {step === 0 && <div className="grid max-w-2xl gap-4">
           {create.error && <ErrorBanner error={create.error} />}

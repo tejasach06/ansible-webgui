@@ -28,6 +28,7 @@ const ERROR_COPY: Record<string, string> = {
   template_busy: "This template already has a queued or running live job. Wait for it to finish.",
   job_not_found: "That job run no longer exists.",
   self_approval_forbidden: "You cannot approve a job you requested. Ask another approver.",
+  rejection_reason_required: "A rejection reason is required. It is recorded in the audit trail.",
   bad_state: "This job is no longer awaiting approval. Reload to see its current state.",
   stale_write: "This file changed in git since you opened it. Reload it or overwrite the newer version.",
   lint_error: "ansible-lint rejected this file. Fix the reported issue and save again.",

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
-from app.api.jobs.schemas import ApproveRequest, JobRequest, RelaunchRequest
+from app.api.jobs.schemas import ApproveRequest, JobRequest, RejectRequest, RelaunchRequest
 from app.core.config import settings
 from app.core.rbac import get_user_permissions
 from app.core.time import utcnow
@@ -295,6 +295,7 @@ async def approve_job(
 @router.post("/{job_id}/reject")
 async def reject_job(
     job_id: int,
+    req: RejectRequest | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -303,14 +304,19 @@ async def reject_job(
     if job.status != JobStatus.pending_approval:
         raise HTTPException(status_code=409, detail={"code": "bad_state", "message": "Job is not in pending_approval state"})
 
+    reason = (req.reason or "").strip() if req else ""
+    if not reason:
+        raise HTTPException(status_code=422, detail={"code": "rejection_reason_required", "message": "A rejection reason is required"})
+
     job.status = JobStatus.rejected
+    job.approval_note = reason
     if job.pipeline_run_id:
         prun = (await db.execute(select(PipelineRun).where(PipelineRun.id == job.pipeline_run_id))).scalar_one_or_none()
         if prun:
             prun.status = PipelineStatus.failed
             prun.finished_at = utcnow()
     await db.commit()
-    await audit(db, "job_rejected", actor_user_id=user.id, object_type="job_run", object_id=job.id)
+    await audit(db, "job_rejected", actor_user_id=user.id, object_type="job_run", object_id=job.id, detail={"reason": reason})
     return {"id": job.id, "status": job.status}
 
 

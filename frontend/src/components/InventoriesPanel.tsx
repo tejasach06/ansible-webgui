@@ -8,6 +8,7 @@ import { useTheme } from "../lib/theme";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
 import { PageHeader } from "./PageHeader";
+import { Section } from "./Section";
 import { DataTable } from "./DataTable";
 import { Drawer } from "./Drawer";
 import { Dialog } from "./Dialog";
@@ -175,9 +176,64 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
         </div>
       )}
       {!projectId ? (
-        <PageHeader
+        <>
+          <PageHeader
+            title="Inventories"
+            subtitle="Host inventories, shared across projects or owned by one."
+            actions={
+              <Button
+                icon={<Plus size={16} strokeWidth={1.5} />}
+                variant={canInventoryWrite ? "primary" : "secondary"}
+                aria-disabled={!canInventoryWrite}
+                onClick={canInventoryWrite ? openCreate : () => toast("You need inventory write access: a system admin role, or owner/maintainer/developer membership in a project.")}
+              >
+                Register inventory
+              </Button>
+            }
+          />
+          {(list.error || create.error || del.error || update.error || updateProject.error) && (
+            <ErrorBanner error={list.error || create.error || del.error || update.error || updateProject.error} />
+          )}
+          <DataTable<Inventory>
+            rows={list.data ?? []}
+            loading={list.isLoading}
+            empty={<EmptyState>No inventories yet. Register an inventory from the shared inventory repo.</EmptyState>}
+            columns={[
+              { key: "name", header: "Name", render: r => r.name },
+              {
+                key: "scope",
+                header: "Scope",
+                render: r => (
+                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                    {r.project_id ? "Project" : "Shared"}
+                  </span>
+                ),
+              },
+              { key: "path", header: "Path", render: r => r.rel_path },
+              { key: "format", header: "Format", render: r => r.format },
+              {
+                key: "actions",
+                header: "Actions",
+                render: r => (
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEdit(r)}>
+                      Edit
+                    </Button>
+                    {canWriteInv(r) && (
+                      <Button size="sm" variant="danger" onClick={() => setTarget(r)}>
+                        Delete
+                      </Button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </>
+      ) : (
+        <Section
           title="Inventories"
-          subtitle="Host inventories, shared across projects or owned by one."
+          divider={false}
           actions={
             <Button
               icon={<Plus size={16} strokeWidth={1.5} />}
@@ -188,63 +244,47 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
               Register inventory
             </Button>
           }
-        />
-      ) : (
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Inventories</h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Host inventories available to this project.
-            </p>
-          </div>
-          <Button
-            icon={<Plus size={16} strokeWidth={1.5} />}
-            variant={canInventoryWrite ? "primary" : "secondary"}
-            aria-disabled={!canInventoryWrite}
-            onClick={canInventoryWrite ? openCreate : () => toast("You need inventory write access: a system admin role, or owner/maintainer/developer membership in a project.")}
-          >
-            Register inventory
-          </Button>
-        </div>
+        >
+          {(list.error || create.error || del.error || update.error || updateProject.error) && (
+            <ErrorBanner error={list.error || create.error || del.error || update.error || updateProject.error} />
+          )}
+          <DataTable<Inventory>
+            rows={list.data ?? []}
+            loading={list.isLoading}
+            empty={<EmptyState>No inventories yet. Register an inventory from the shared inventory repo.</EmptyState>}
+            columns={[
+              { key: "name", header: "Name", render: r => r.name },
+              {
+                key: "scope",
+                header: "Scope",
+                render: r => (
+                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                    {r.project_id ? "Project" : "Shared"}
+                  </span>
+                ),
+              },
+              { key: "path", header: "Path", render: r => r.rel_path },
+              { key: "format", header: "Format", render: r => r.format },
+              {
+                key: "actions",
+                header: "Actions",
+                render: r => (
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEdit(r)}>
+                      Edit
+                    </Button>
+                    {canWriteInv(r) && (
+                      <Button size="sm" variant="danger" onClick={() => setTarget(r)}>
+                        Delete
+                      </Button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </Section>
       )}
-      {(list.error || create.error || del.error || update.error || updateProject.error) && (
-        <ErrorBanner error={list.error || create.error || del.error || update.error || updateProject.error} />
-      )}
-      <DataTable<Inventory>
-        rows={list.data ?? []}
-        loading={list.isLoading}
-        empty={<EmptyState>No inventories yet. Register an inventory from the shared inventory repo.</EmptyState>}
-        columns={[
-          { key: "name", header: "Name", render: r => r.name },
-          {
-            key: "scope",
-            header: "Scope",
-            render: r => (
-              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-                {r.project_id ? "Project" : "Shared"}
-              </span>
-            ),
-          },
-          { key: "path", header: "Path", render: r => r.rel_path },
-          { key: "format", header: "Format", render: r => r.format },
-          {
-            key: "actions",
-            header: "Actions",
-            render: r => (
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEdit(r)}>
-                  Edit
-                </Button>
-                {canWriteInv(r) && (
-                  <Button size="sm" variant="danger" onClick={() => setTarget(r)}>
-                    Delete
-                  </Button>
-                )}
-              </div>
-            ),
-          },
-        ]}
-      />
       <Drawer
         open={open}
         onClose={close}
@@ -318,7 +358,7 @@ export function InventoriesPanel({ projectId }: { projectId?: number }) {
                   {verifyResult.hosts.length} {verifyResult.hosts.length === 1 ? "host" : "hosts"} resolved
                 </div>
                 {verifyResult.hosts.length === 0 ? (
-                  <p className="text-zinc-500">No hosts resolved.</p>
+                  <p className="text-fg-muted">No hosts resolved.</p>
                 ) : (
                   <div className="grid gap-1">
                     {Object.entries(verifyResult.groups).map(([grp, hsts]) => (

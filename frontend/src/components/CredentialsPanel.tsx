@@ -368,7 +368,7 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
               {viewKey.public_key}
             </pre>
           ) : (
-            <p className="text-sm text-zinc-500">Public key unavailable — generated keys only.</p>
+            <p className="text-sm text-fg-muted">Public key unavailable — generated keys only.</p>
           )}
         </div>
       </Drawer>

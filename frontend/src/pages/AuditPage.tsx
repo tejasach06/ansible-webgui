@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAudit } from "../api/audit";
+import { ErrorBanner } from "../components/ErrorBanner";
 import { DataTable } from "../components/DataTable";
 import { TextInput } from "../components/Field";
 import { Dialog } from "../components/Dialog";
@@ -8,6 +9,7 @@ import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { KeyValueTable } from "../components/KeyValueTable";
 import type { AuditItem } from "../lib/types";
+import { formatTimestamp } from "../lib/time";
 
 const empty = { action: "", actor: "", object_type: "" };
 
@@ -75,22 +77,6 @@ function formatObject(type?: string | null, id?: string | null): string {
   return `${label} #${id}`;
 }
 
-function formatTimestamp(iso?: string | null): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
 
 export function AuditPage() {
   const limit = 50;
@@ -134,10 +120,11 @@ export function AuditPage() {
           </Button>
         </div>
       </div>
+      {audit.error && <ErrorBanner error={audit.error} />}
       <DataTable
         rows={audit.data?.items ?? []}
         loading={audit.isLoading}
-        empty="No audit events found"
+        empty="No audit events match these filters"
         columns={[
           {
             key: "created",
@@ -262,9 +249,9 @@ export function AuditPage() {
               </div>
             </div>
             <div>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                 Payload & Metadata
-              </h4>
+              </h3>
               <KeyValueTable data={selectedItem.detail} empty="No additional payload recorded for this event." />
             </div>
           </div>

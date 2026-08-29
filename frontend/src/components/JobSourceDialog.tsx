@@ -39,8 +39,9 @@ export function JobSourceDialog({ jobId, open, onClose, initialTab = "playbook" 
           value={tab}
           onChange={setTab}
           labels={{ playbook: "Playbook", inventory: "Inventory" }}
+          idPrefix="job-source"
         />
-        <div role="tabpanel" aria-label={tab === "playbook" ? "Playbook" : "Inventory"} className="flex min-h-0 flex-1 flex-col">
+        <div role="tabpanel" id={`job-source-panel-${tab}`} aria-labelledby={`job-source-tab-${tab}`} className="flex min-h-0 flex-1 flex-col">
           {src.error && <ErrorBanner error={src.error} />}
           {src.isLoading && <PanelSkeleton />}
           {src.data && file === null && (
@@ -77,7 +78,7 @@ export function JobSourceDialog({ jobId, open, onClose, initialTab = "playbook" 
                       options={{
                         readOnly: true,
                         domReadOnly: true,
-                        minimap: { enabled: false },
+                        tabIndex: -1,
                         scrollBeyondLastLine: false,
                         wordWrap: "on",
                         renderLineHighlight: "none",

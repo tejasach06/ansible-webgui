@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Plus } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
@@ -11,6 +12,7 @@ import { DataTable } from "./DataTable";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyState } from "./EmptyState";
 import { Dialog } from "./Dialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export function PipelinesPanel({ projectId }: { projectId: number }) {
   const navigate = useNavigate();
@@ -20,6 +22,7 @@ export function PipelinesPanel({ projectId }: { projectId: number }) {
   const canRun = canInProject(projectId, "job.request");
 
   const [open, setOpen] = useState(false);
+  const [confirmDel, setConfirmDel] = useState<Pipeline | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [steps, setSteps] = useState<PipelineStepInput[]>([]);
@@ -94,7 +97,7 @@ export function PipelinesPanel({ projectId }: { projectId: number }) {
     <Section
       title="Pipelines"
       divider={false}
-      actions={canWrite && <Button onClick={() => setOpen(true)}>Create pipeline</Button>}
+      actions={canWrite && <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={() => setOpen(true)}>Create pipeline</Button>}
     >
       {(error || createMutation.error || runMutation.error || deleteMutation.error) && <ErrorBanner error={error || createMutation.error || runMutation.error || deleteMutation.error} />}
 
@@ -111,12 +114,13 @@ export function PipelinesPanel({ projectId }: { projectId: number }) {
             render: (p) => (
               <div className="flex gap-2">
                 {canRun && <Button size="sm" onClick={() => runMutation.mutate(p.id)} loading={runMutation.isPending}>Run</Button>}
-                {canWrite && <Button variant="danger" size="sm" onClick={() => deleteMutation.mutate(p.id)} loading={deleteMutation.isPending}>Delete</Button>}
+                {canWrite && <Button variant="danger" size="sm" onClick={() => setConfirmDel(p)} loading={deleteMutation.isPending}>Delete</Button>}
               </div>
             ),
           },
         ]}
       />
+      <ConfirmDialog open={!!confirmDel} title="Delete pipeline?" name={confirmDel?.name ?? ""} loading={deleteMutation.isPending} onClose={() => setConfirmDel(null)} onConfirm={() => deleteMutation.mutate(confirmDel!.id, { onSuccess: () => setConfirmDel(null) })} />
 
       <Dialog open={open} onClose={() => setOpen(false)} title="Create pipeline">
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -131,7 +135,7 @@ export function PipelinesPanel({ projectId }: { projectId: number }) {
             {steps.map((step, index) => (
               <div key={index} className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
                 <span className="text-xs font-bold">{index + 1}.</span>
-                <select value={step.template_id} onChange={(e) => setSteps(steps.map((s, i) => (i === index ? { ...s, template_id: Number(e.target.value) } : s)))} className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-950">
+                <select aria-label={`Template for step ${index + 1}`} value={step.template_id} onChange={(e) => setSteps(steps.map((s, i) => (i === index ? { ...s, template_id: Number(e.target.value) } : s)))} className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-950">
                   {(templates ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
                 <Checkbox id={`step-approval-${index}`} label="Requires approval" checked={step.requires_approval} onChange={(e) => setSteps(steps.map((s, i) => (i === index ? { ...s, requires_approval: e.target.checked } : s)))} />

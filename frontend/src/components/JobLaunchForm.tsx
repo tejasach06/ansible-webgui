@@ -13,6 +13,7 @@ import { useToast } from "./Toast";
 import { buildInventory } from "./InventoryHostsWizard";
 import { fromSlots, toSlots } from "../lib/credentialSlots";
 import { CredentialSlots } from "./CredentialSlots";
+import { ModeBadge } from "./ModeBadge";
 
 const slotMemoryKey = (projectId: number) => `awg.credSlots.v1.${projectId}`;
 
@@ -135,7 +136,14 @@ export function JobLaunchForm({ form, setForm, extraError, setExtraError, lockPl
 
     {newInventoryOpen && canInventoryWrite && <div className="grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"><div><div className="text-sm font-medium">New inventory</div><p className="text-xs text-zinc-500 dark:text-zinc-400">Create a global inventory and select it for this launch.</p></div>{createInventory.error && <ErrorBanner error={createInventory.error} />}{invalidYaml && <pre className="max-h-40 overflow-auto rounded-md bg-zinc-950 p-3 text-xs text-zinc-100 dark:bg-zinc-900">{invalidYaml}</pre>}<TextInput id="job-new-inventory-name" label="Name" value={newInventory.name} onChange={(e) => setNewInventory({ ...newInventory, name: e.target.value })} /><TextInput id="job-new-inventory-filename" label="File name (e.g. hosts.yml)" value={newInventory.filename} onChange={(e) => setNewInventory({ ...newInventory, filename: e.target.value })} /><Select id="job-new-inventory-format" label="Format" value={newInventory.format} onChange={(e) => setNewInventoryFormat(e.target.value as InventoryFormat)}><option value="yaml">YAML</option><option value="ini">INI</option></Select><TextArea id="job-new-inventory-content" label="Inventory content" value={newInventory.content} onChange={(e) => setNewInventory({ ...newInventory, content: e.target.value })} rows={5} spellCheck={false} /><div className="flex justify-end gap-2"><Button size="sm" variant="secondary" onClick={cancelNewInventory}>Cancel</Button><Button size="sm" disabled={!newInventoryValid} loading={createInventory.isPending} onClick={createNewInventory}>Create & select</Button></div></div>}
 
-    <Select id="job-mode" label="Mode" value={form.mode} disabled={(canAny("job.run_check") && !canAny("job.request")) || locked(selectedTemplate?.ask_mode)} onChange={(e) => setForm({ ...form, mode: e.target.value as JobMode })}><option value="check">check</option><option value="live">live</option></Select>
+    <div className="flex items-end gap-2">
+      <div className="flex-1">
+        <Select id="job-mode" label="Mode" value={form.mode} disabled={(canAny("job.run_check") && !canAny("job.request")) || locked(selectedTemplate?.ask_mode)} onChange={(e) => setForm({ ...form, mode: e.target.value as JobMode })}><option value="check">check</option><option value="live">live</option></Select>
+      </div>
+      <div className="pb-2">
+        <ModeBadge mode={form.mode} />
+      </div>
+    </div>
     <LockedHint show={locked(selectedTemplate?.ask_mode)} />
     <TextInput id="job-limit" label="Limit" value={form.limit} disabled={locked(selectedTemplate?.ask_limit)} onChange={(e) => setForm({ ...form, limit: e.target.value })} />
     <LockedHint show={locked(selectedTemplate?.ask_limit)} />

@@ -7,5 +7,5 @@ import App from "./App";
 import { ThemeProvider } from "./lib/theme";
 import { AuthProvider } from "./lib/auth";
 import { ToastProvider } from "./components/Toast";
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 5000 } } });
 ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><QueryClientProvider client={queryClient}><BrowserRouter><ThemeProvider><AuthProvider><ToastProvider><App /></ToastProvider></AuthProvider></ThemeProvider></BrowserRouter></QueryClientProvider></React.StrictMode>);

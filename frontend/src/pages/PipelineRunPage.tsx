@@ -6,6 +6,7 @@ import { StatusPill } from "../components/StatusPill";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { EmptyState } from "../components/EmptyState";
 import { linkClass } from "../lib/cn";
 
 export function PipelineRunPage() {
@@ -17,14 +18,6 @@ export function PipelineRunPage() {
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status && ["successful", "failed", "canceled"].includes(status) ? false : 3000;
-    },
-  });
-  const approve = useMutation({
-    mutationFn: (jobId: number) => apiFetch(`/api/jobs/${jobId}/approve`, { method: "POST", body: JSON.stringify({ approval_note: "" }) }),
-    onSuccess: (_data, jobId) => {
-      queryClient.invalidateQueries({ queryKey: ["pipeline-run", runId] });
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      queryClient.invalidateQueries({ queryKey: ["job", jobId] });
     },
   });
   const cancel = useMutation({
@@ -56,7 +49,6 @@ export function PipelineRunPage() {
         actions={canCancel && <Button variant="danger" loading={cancel.isPending} onClick={() => cancel.mutate()}>Cancel</Button>}
       />
       {run.error && <ErrorBanner error={run.error} />}
-      {approve.error && <ErrorBanner error={approve.error} />}
       {cancel.error && <ErrorBanner error={cancel.error} />}
       {data && (
         <>
@@ -68,21 +60,27 @@ export function PipelineRunPage() {
               </div>
             ))}
           </dl>
-          <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-            {data.steps.map((step) => (
-              <div key={step.position} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">Step {step.position + 1}</div>
-                  <div className="font-medium">{step.template_name}</div>
-                  {step.job_run_id ? <Link className={`text-sm ${linkClass}`} to={`/jobs/${step.job_run_id}`}>Job #{step.job_run_id}</Link> : <div className="text-sm text-zinc-500 dark:text-zinc-400">No child job yet</div>}
+          {data.steps.length ? (
+            <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+              {data.steps.map((step) => (
+                <div key={step.position} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400">Step {step.position + 1}</div>
+                    <div className="font-medium">{step.template_name}</div>
+                    {step.job_run_id ? <Link className={`text-sm ${linkClass}`} to={`/jobs/${step.job_run_id}`}>Job #{step.job_run_id}</Link> : <div className="text-sm text-zinc-500 dark:text-zinc-400">No child job yet</div>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StatusPill status={step.status} />
+                    {step.status === "pending_approval" && step.job_run_id && (
+                      <Link className={`text-sm ${linkClass}`} to={`/approvals/${step.job_run_id}`}>Review</Link>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <StatusPill status={step.status} />
-                  {step.status === "pending_approval" && step.job_run_id && <Button size="sm" loading={approve.isPending} onClick={() => approve.mutate(step.job_run_id!)}>Approve</Button>}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState>This pipeline run has no steps.</EmptyState>
+          )}
         </>
       )}
     </section>

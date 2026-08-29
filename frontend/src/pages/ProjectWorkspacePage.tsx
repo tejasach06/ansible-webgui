@@ -77,15 +77,17 @@ export function ProjectWorkspacePage() {
 
       <RunJobDialog open={run} onClose={() => setRun(false)} projectId={projectId} />
 
-      <Tabs tabs={tabs} value={tab} onChange={setTab} labels={tabLabels} />
-      {tab === "files" && <ProjectFilesPanel projectId={projectId} />}
-      {tab === "playbooks" && <PlaybooksPanel projectId={projectId} />}
-      {tab === "inventories" && <InventoriesPanel projectId={projectId} />}
-      {tab === "credentials" && <CredentialsPanel projectId={projectId} />}
-      {tab === "templates" && <TemplatesPanel projectId={projectId} />}
-      {tab === "pipelines" && <PipelinesPanel projectId={projectId} />}
-      {tab === "schedules" && <SchedulesPanel projectId={projectId} />}
-      {tab === "members" && <MembersPanel projectId={projectId} />}
+      <Tabs tabs={tabs} value={tab} onChange={setTab} labels={tabLabels} idPrefix="workspace-tabs" />
+      <div role="tabpanel" id={`workspace-tabs-panel-${tab}`} aria-labelledby={`workspace-tabs-tab-${tab}`} tabIndex={0}>
+        {tab === "files" && <ProjectFilesPanel projectId={projectId} />}
+        {tab === "playbooks" && <PlaybooksPanel projectId={projectId} />}
+        {tab === "inventories" && <InventoriesPanel projectId={projectId} />}
+        {tab === "credentials" && <CredentialsPanel projectId={projectId} />}
+        {tab === "templates" && <TemplatesPanel projectId={projectId} />}
+        {tab === "pipelines" && <PipelinesPanel projectId={projectId} />}
+        {tab === "schedules" && <SchedulesPanel projectId={projectId} />}
+        {tab === "members" && <MembersPanel projectId={projectId} />}
+      </div>
     </section>
   );
 }

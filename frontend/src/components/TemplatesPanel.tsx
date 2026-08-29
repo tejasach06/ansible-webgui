@@ -10,9 +10,11 @@ import { useToast } from "./Toast";
 import { Button } from "./Button";
 import { Section } from "./Section";
 import { Drawer } from "./Drawer";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { DataTable } from "./DataTable";
 import { TextArea, TextInput, Checkbox, Select, NumberInput } from "./Field";
 import { ErrorBanner } from "./ErrorBanner";
+import { EmptyState } from "./EmptyState";
 import { CredentialSlots } from "./CredentialSlots";
 
 const init = {
@@ -51,6 +53,7 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<JobTemplate>();
+  const [confirmDel, setConfirmDel] = useState<JobTemplate | null>(null);
   const [form, setForm] = useState(init);
   const [extraError, setExtraError] = useState("");
   const first = useRef<HTMLInputElement>(null);
@@ -165,11 +168,10 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
       {(list.error || create.error || update.error || del.error) && (
         <ErrorBanner error={list.error || create.error || update.error || del.error} />
       )}
-
       <DataTable<JobTemplate>
         rows={list.data ?? []}
         loading={list.isLoading}
-        empty={<p className="p-4 text-sm text-zinc-500">No job templates created yet.</p>}
+        empty={<EmptyState>No job templates created yet.</EmptyState>}
         columns={[
           { key: "name", header: "Name", render: (r) => r.name },
           { key: "desc", header: "Description", render: (r) => r.description || "-" },
@@ -182,7 +184,7 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
                 <Button size="sm" variant="secondary" onClick={() => { setEditing(r); setOpen(true); }}>
                   Edit
                 </Button>
-                <Button size="sm" variant="danger" onClick={() => del.mutate(r.id)}>
+                <Button size="sm" variant="danger" onClick={() => setConfirmDel(r)}>
                   Delete
                 </Button>
               </div>
@@ -190,6 +192,7 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
           },
         ]}
       />
+      <ConfirmDialog open={!!confirmDel} title="Delete job template?" name={confirmDel?.name ?? ""} loading={del.isPending} onClose={() => setConfirmDel(null)} onConfirm={() => del.mutate(confirmDel!.id, { onSuccess: () => setConfirmDel(null) })} />
 
       <Drawer
         open={open}
@@ -239,7 +242,7 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
           <TextInput id="template-skip-tags" label="Skip tags" value={form.skip_tags} onChange={(e) => setForm({ ...form, skip_tags: e.target.value })} />
 
           <TextArea id="template-extravars" label="Extra Vars (JSON)" value={form.extra_vars} onChange={(e) => { setForm({ ...form, extra_vars: e.target.value }); setExtraError(""); }} />
-          {extraError && <p className="text-xs text-red-500">{extraError}</p>}
+          {extraError && <p className="text-xs text-danger">{extraError}</p>}
 
           <div className="grid grid-cols-2 gap-3">
             <NumberInput id="template-verbosity" label="Verbosity" value={form.verbosity} onChange={(e) => setForm({ ...form, verbosity: Number(e.target.value) })} />

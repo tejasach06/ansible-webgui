@@ -7,7 +7,7 @@ const INVARIANTS = [
 function HeroPanel({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
-      <aside className="border-t border-zinc-800 bg-zinc-950 px-6 py-10 text-zinc-100 md:hidden" style={{ backgroundImage: "radial-gradient(80% 60% at 15% 0%, rgb(2 132 199 / 0.18), transparent 60%)" }}>
+      <aside aria-hidden="true" className="border-t border-zinc-800 bg-zinc-950 px-6 py-10 text-zinc-100 md:hidden" style={{ backgroundImage: "radial-gradient(80% 60% at 15% 0%, rgb(2 132 199 / 0.18), transparent 60%)" }}>
         <h2 className="text-xl font-semibold leading-tight tracking-tight text-zinc-100">Every run is pinned, reviewed, and logged.</h2>
         <div className="mt-6 divide-y divide-zinc-800">
           {INVARIANTS.map(({ Icon, title, body }) => (
