@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { FileCode } from "lucide-react";
 import { useJob, useJobAction } from "../api/jobs";
 import { Button } from "../components/Button";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { TextArea } from "../components/Field";
+import { JobSourceDialog } from "../components/JobSourceDialog";
+import { KeyValueTable } from "../components/KeyValueTable";
 import { OverrideDiff } from "../components/OverrideDiff";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
@@ -11,7 +14,8 @@ import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { linkClass } from "../lib/cn";
-import { KeyValueTable } from "../components/KeyValueTable";
+import { runSummary } from "../lib/runSummary";
+import { formatTimestamp } from "../lib/time";
 
 export function ApprovalReviewPage() {
   const id = Number(useParams().jobId);
@@ -22,6 +26,9 @@ export function ApprovalReviewPage() {
   const approve = useJobAction(id, "approve");
   const reject = useJobAction(id, "reject");
   const [note, setNote] = useState("");
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceTab, setSourceTab] = useState<"playbook" | "inventory">("playbook");
+  const openSource = (t: "playbook" | "inventory") => { setSourceTab(t); setSourceOpen(true); };
 
   const data = job.data;
   const ctx = data?.context;
@@ -40,14 +47,23 @@ export function ApprovalReviewPage() {
     <section className="grid gap-6">
       <PageHeader
         title={`Approve job ${id}`}
-        subtitle="Everything frozen at request time. Review before approving."
+        subtitle="Everything below is frozen at request time."
         status={data && <StatusPill status={data.status} />}
       />
+      {data && <p className="max-w-[75ch] text-base leading-relaxed text-zinc-800 dark:text-zinc-200">{runSummary(data)}</p>}
 
       {job.error && <ErrorBanner error={job.error} />}
       {(approve.error || reject.error) && <ErrorBanner error={approve.error || reject.error} />}
 
-      <Section title="What will run" divider={false}>
+      <Section
+        title="What will run"
+        divider={false}
+        actions={
+          <Button variant="secondary" size="sm" icon={<FileCode size={16} strokeWidth={1.5} />} onClick={() => openSource("playbook")}>
+            View playbook &amp; inventory
+          </Button>
+        }
+      >
         <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg bg-zinc-200 md:grid-cols-2 dark:bg-zinc-800">
           <div className="bg-white px-3 py-2 text-sm dark:bg-zinc-950">
             <dt className="text-xs text-zinc-500 dark:text-zinc-400">Project</dt>
@@ -57,14 +73,22 @@ export function ApprovalReviewPage() {
             <dt className="text-xs text-zinc-500 dark:text-zinc-400">Playbook</dt>
             <dd className="mt-0.5">
               <div className="font-medium">{ctx?.playbook_name ?? "-"}</div>
-              {ctx?.playbook_rel_path && <div className="text-xs text-zinc-500">{ctx.playbook_rel_path}</div>}
+              {ctx?.playbook_rel_path && (
+                <button type="button" className={`text-xs ${linkClass}`} onClick={() => openSource("playbook")}>
+                  {ctx.playbook_rel_path}
+                </button>
+              )}
             </dd>
           </div>
           <div className="bg-white px-3 py-2 text-sm dark:bg-zinc-950">
             <dt className="text-xs text-zinc-500 dark:text-zinc-400">Inventory</dt>
             <dd className="mt-0.5">
               <div className="font-medium">{ctx?.inventory_name ?? "-"}</div>
-              {ctx?.inventory_rel_path && <div className="text-xs text-zinc-500">{ctx.inventory_rel_path}</div>}
+              {ctx?.inventory_rel_path && (
+                <button type="button" className={`text-xs ${linkClass}`} onClick={() => openSource("inventory")}>
+                  {ctx.inventory_rel_path}
+                </button>
+              )}
             </dd>
           </div>
           <div className="bg-white px-3 py-2 text-sm dark:bg-zinc-950">
@@ -81,7 +105,7 @@ export function ApprovalReviewPage() {
           </div>
           <div className="bg-white px-3 py-2 text-sm dark:bg-zinc-950">
             <dt className="text-xs text-zinc-500 dark:text-zinc-400">Requested at</dt>
-            <dd className="mt-0.5 font-mono">{data?.created_at ?? "-"}</dd>
+            <dd className="mt-0.5" title={data?.created_at ?? undefined}>{formatTimestamp(data?.created_at)}</dd>
           </div>
         </dl>
       </Section>
@@ -212,6 +236,7 @@ export function ApprovalReviewPage() {
           </div>
         </Section>
       )}
+      {data && <JobSourceDialog jobId={id} open={sourceOpen} onClose={() => setSourceOpen(false)} initialTab={sourceTab} />}
     </section>
   );
 }

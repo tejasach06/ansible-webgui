@@ -31,6 +31,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.services.approvals import approve_job_run, freeze_params_snapshot
+from app.services.credential_slots import SLOT_LABEL, find_slot_conflict
 from app.services.audit import audit
 from app.services.content import get_inventory_repo_path, get_project_repo_path
 from app.services.credentials import encrypt_payload
@@ -123,6 +124,10 @@ async def request_job(
         has_become_pass = any(kind == CredentialKind.become_password for _, _, _, kind, _ in rows)
         if has_become_same and has_become_pass:
             raise HTTPException(status_code=422, detail={"code": "become_password_conflict", "message": "Selected credential already reuses the SSH password for become; remove the separate become password credential"})
+        conflict = find_slot_conflict([(name, kind) for name, _, _, kind, _ in rows])
+        if conflict:
+            slot, names = conflict
+            raise HTTPException(status_code=422, detail={"code": "credential_slot_conflict", "message": f"Select at most one {SLOT_LABEL[slot]} credential", "slot": slot, "credentials": names})
     project = (await db.execute(select(Project).where(Project.id == playbook.project_id))).scalar_one_or_none()
     repo_path = get_project_repo_path(project.name)
     repo = Repo(repo_path)

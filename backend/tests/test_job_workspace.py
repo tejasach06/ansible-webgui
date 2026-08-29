@@ -25,8 +25,9 @@ class _Db:
 
 
 class _Credential:
-    def __init__(self, cred_id, kind, username, payload, become_same_as_ssh=False):
+    def __init__(self, cred_id, kind, username, payload, become_same_as_ssh=False, name="test-cred"):
         self.id = cred_id
+        self.name = name
         self.kind = kind
         self.username = username
         self.payload_enc = encrypt_payload(payload)

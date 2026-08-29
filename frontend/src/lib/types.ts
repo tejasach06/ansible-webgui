@@ -17,11 +17,13 @@ export interface JobTemplate { id:number; project_id:number; name:string; descri
 export type JobStatus = "pending_approval" | "approved" | "rejected" | "queued" | "running" | "successful" | "failed" | "canceled" | "timed_out";
 export type JobMode = "check" | "live";
 export const TERMINAL_JOB_STATUSES: JobStatus[] = ["successful", "failed", "canceled", "timed_out", "rejected"];
-export interface JobListItem { id:number; template_id?:number|null; playbook_id:number; inventory_id:number; mode:JobMode; status:JobStatus; requested_by:number; approved_by?:number|null; created_at?:string|null; finished_at?:string|null }
+export interface JobListItem { id:number; template_id?:number|null; playbook_id:number; playbook_name?:string|null; playbook_rel_path?:string|null; inventory_id:number; inventory_name?:string|null; inventory_rel_path?:string|null; mode:JobMode; status:JobStatus; requested_by:number; approved_by?:number|null; created_at?:string|null; finished_at?:string|null }
 export interface OverrideValue { template:unknown; request:unknown }
 export interface JobCredentialRef { id:number; name:string; kind:string; username?:string|null }
 export interface JobContext { project_name?:string|null; playbook_name?:string|null; playbook_rel_path?:string|null; inventory_name?:string|null; inventory_rel_path?:string|null; template_name?:string|null; requested_by_username?:string|null; approved_by_username?:string|null; credentials:JobCredentialRef[] }
 export interface JobDetail extends JobListItem { approval_note?:string|null; rc?:number|null; stats?:Record<string,unknown>|null; params_snapshot?:Record<string,unknown>|null; overrides?:Record<string,OverrideValue>; context?:JobContext; started_at?:string|null; relaunch_of_id?:number|null }
+export interface JobSourceFile { rel_path:string; content:string|null; sha:string|null; is_vault:boolean; error:string|null }
+export interface JobSource { playbook:JobSourceFile|null; inventory:JobSourceFile|null }
 export interface JobReportTask { uuid?:string|null; name?:string|null; action?:string|null; duration_ms:number; results:Record<string,number>; failed_hosts:string[]; first_failure_counter?:number|null }
 export interface JobReportPlay { uuid?:string|null; name?:string|null; duration_ms:number; tasks:JobReportTask[] }
 export interface HostSummaryRow { host:string; ok:number; changed:number; failed:number; unreachable:number; skipped:number; status:"ok"|"changed"|"failed"|"unreachable"|"skipped"; first_failure_counter?:number|null }

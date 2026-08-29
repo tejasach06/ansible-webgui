@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { FileCode } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { useJob, useJobAction, useJobReport, useRelaunchJob } from "../api/jobs";
@@ -11,12 +12,15 @@ import { Tabs } from "../components/Tabs";
 import { StatusPill } from "../components/StatusPill";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Dialog } from "../components/Dialog";
+import { JobSourceDialog } from "../components/JobSourceDialog";
 import { TextInput } from "../components/Field";
 import { TaskTree } from "../components/TaskTree";
 import { HostMatrix } from "../components/HostMatrix";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { linkClass } from "../lib/cn";
 import { KeyValueTable } from "../components/KeyValueTable";
+import { runSummary } from "../lib/runSummary";
+import { formatTimestamp } from "../lib/time";
 
 function JobLogTerminal({ jobId, status, rc, jumpCounter }: { jobId: number; status?: string; rc?: number | null; jumpCounter?: number | null }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -100,11 +104,25 @@ export function JobDetailPage() {
   const [confirm, setConfirm] = useState<"reject" | "cancel" | "relaunch" | "failed" | null>(null);
   const [tab, setTab] = useState<"output" | "report" | "params">("output");
   const [jump, setJump] = useState<number | null>(null);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceTab, setSourceTab] = useState<"playbook" | "inventory">("playbook");
+  const openSource = (t: "playbook" | "inventory") => { setSourceTab(t); setSourceOpen(true); };
   const data = job.data;
   const snapshot = data?.params_snapshot ?? {};
   const failedHosts = report.data?.hosts.filter((host) => ["failed", "unreachable"].includes(host.status)).map((host) => host.host) ?? [];
   const firstFailure = report.data?.hosts.find((host) => host.first_failure_counter)?.first_failure_counter;
-  const rows = [["Mode", data?.mode], ["Status", data?.status], ["Requested by", data?.requested_by], ["Approved by", data?.approved_by ?? "-"], ["Created", data?.created_at ?? "-"], ["Started", data?.started_at ?? "-"], ["Finished", data?.finished_at ?? "-"], ["rc", data?.rc ?? "-"], ["git_sha", String(snapshot.git_sha ?? "-")], ["Relaunch of", data?.relaunch_of_id ? `#${data.relaunch_of_id}` : "-"]];
+  const rows = [
+    ["Mode", data?.mode],
+    ["Status", data?.status],
+    ["Requested by", data?.requested_by],
+    ["Approved by", data?.approved_by ?? "-"],
+    ["Created", formatTimestamp(data?.created_at)],
+    ["Started", formatTimestamp(data?.started_at)],
+    ["Finished", formatTimestamp(data?.finished_at)],
+    ["rc", data?.rc ?? "-"],
+    ["git_sha", String(snapshot.git_sha ?? "-")],
+    ["Relaunch of", data?.relaunch_of_id ? `#${data.relaunch_of_id}` : "-"],
+  ];
 
   const jumpToOutput = (counter: number) => { setTab("output"); setJump(counter); };
 
@@ -114,7 +132,13 @@ export function JobDetailPage() {
         title={`Job ${id}`}
         subtitle="Streamed output, host report, and the frozen launch parameters."
         status={data && <StatusPill status={data.status} />}
+        actions={
+          <Button variant="secondary" size="sm" icon={<FileCode size={16} strokeWidth={1.5} />} onClick={() => openSource("playbook")}>
+            View playbook &amp; inventory
+          </Button>
+        }
       />
+      {data && <p className="max-w-[75ch] text-base leading-relaxed text-zinc-800 dark:text-zinc-200">{runSummary(data)}</p>}
       {job.error && <ErrorBanner error={job.error} />}
       {report.error && <ErrorBanner error={report.error} />}
       <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg bg-zinc-200 md:grid-cols-2 dark:bg-zinc-800">{rows.map(([key, value]) => <div key={key} className="bg-white px-3 py-2 text-sm dark:bg-zinc-950"><dt className="text-xs text-zinc-500 dark:text-zinc-400">{key}</dt><dd className="mt-0.5 font-mono">{String(value)}</dd></div>)}</dl>
@@ -130,6 +154,7 @@ export function JobDetailPage() {
       {tab === "params" && <KeyValueTable data={snapshot} empty="No launch parameters recorded." />}
       <Dialog open={approval} onClose={() => { setApproval(false); setNote(""); }} title="Approve run"><TextInput id="note" label="Approval note" value={note} onChange={(event) => setNote(event.target.value)} /><div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={() => setApproval(false)}>Cancel</Button><Button disabled={!note.trim()} loading={approve.isPending} onClick={() => approve.mutate({ approval_note: note.trim() }, { onSuccess: () => { setApproval(false); setNote(""); } })}>Approve</Button></div></Dialog>
       <ConfirmDialog open={!!confirm} title={confirm === "reject" ? "Reject job?" : confirm === "cancel" ? "Cancel job?" : confirm === "failed" ? "Relaunch failed hosts?" : "Relaunch job?"} name={confirm === "failed" ? `${failedHosts.join(",")} @ ${String(snapshot.git_sha ?? "").slice(0, 8)}` : `job ${id}`} onClose={() => setConfirm(null)} onConfirm={() => { if (confirm === "reject") reject.mutate(undefined, { onSuccess: () => setConfirm(null) }); if (confirm === "cancel") cancel.mutate(undefined, { onSuccess: () => setConfirm(null) }); if (confirm === "relaunch") relaunch.mutate({ hosts: "all" }, { onSuccess: (result) => navigate(`/jobs/${result.id}`) }); if (confirm === "failed") relaunch.mutate({ hosts: "failed" }, { onSuccess: (result) => navigate(`/jobs/${result.id}`) }); }} />
+      {data && <JobSourceDialog jobId={id} open={sourceOpen} onClose={() => setSourceOpen(false)} initialTab={sourceTab} />}
     </section>
   );
 }

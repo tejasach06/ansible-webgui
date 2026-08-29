@@ -4,21 +4,22 @@ import { useCancelJob, useJob, useJobs, useLaunchJob } from "../api/jobs";
 import { usePlaybooks } from "../api/playbooks";
 import { useTemplates } from "../api/templates";
 import { Button } from "../components/Button";
-import { PageHeader } from "../components/PageHeader";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DataTable } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { ConfirmDialog } from "../components/ConfirmDialog";
-import { buildLaunchBody, formFromTemplate, init, JobLaunchForm, surveyComplete } from "../components/JobLaunchForm";
-import { Pagination } from "../components/Pagination";
 import { Select } from "../components/Field";
+import { buildLaunchBody, formFromTemplate, init, JobLaunchForm, surveyComplete } from "../components/JobLaunchForm";
+import { JobSourceDialog } from "../components/JobSourceDialog";
+import { PageHeader } from "../components/PageHeader";
+import { Pagination } from "../components/Pagination";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { linkClass } from "../lib/cn";
+import { formatTimestamp } from "../lib/time";
 import type { JobListItem, JobMode, JobStatus } from "../lib/types";
 import { TERMINAL_JOB_STATUSES } from "../lib/types";
-
 const statuses: JobStatus[] = ["pending_approval", "approved", "rejected", "queued", "running", "successful", "failed", "canceled", "timed_out"];
 
 export function JobsPage() {
@@ -33,6 +34,7 @@ export function JobsPage() {
   const [extraError, setExtraError] = useState("");
   const [relaunchId, setRelaunchId] = useState<number>();
   const [cancelTarget, setCancelTarget] = useState<JobListItem>();
+  const [sourceTarget, setSourceTarget] = useState<{ id: number; tab: "playbook" | "inventory" }>();
   const first = useRef<HTMLSelectElement>(null);
   const jobs = useJobs(limit, offset, status || undefined);
   const templates = useTemplates();
@@ -129,8 +131,32 @@ export function JobsPage() {
         columns={[
           { key: "id", header: "ID", render: (r) => <Link className={linkClass} to={`/jobs/${r.id}`}>#{r.id}</Link> },
           { key: "status", header: "Status", render: (r) => <StatusPill status={r.status} /> },
+          {
+            key: "playbook",
+            header: "Playbook",
+            render: (r) =>
+              r.playbook_rel_path ? (
+                <button type="button" className={`text-xs ${linkClass}`} onClick={() => setSourceTarget({ id: r.id, tab: "playbook" })}>
+                  {r.playbook_rel_path}
+                </button>
+              ) : (
+                (r.playbook_name ?? "-")
+              ),
+          },
+          {
+            key: "inventory",
+            header: "Inventory",
+            render: (r) =>
+              r.inventory_rel_path ? (
+                <button type="button" className={`text-xs ${linkClass}`} onClick={() => setSourceTarget({ id: r.id, tab: "inventory" })}>
+                  {r.inventory_rel_path}
+                </button>
+              ) : (
+                (r.inventory_name ?? "-")
+              ),
+          },
           { key: "mode", header: "Mode", render: (r) => r.mode },
-          { key: "created", header: "Created", render: (r) => r.created_at },
+          { key: "created", header: "Created", render: (r) => <span title={r.created_at ?? undefined}>{formatTimestamp(r.created_at)}</span> },
           {
             key: "actions",
             header: "Actions",
@@ -196,6 +222,14 @@ export function JobsPage() {
           onTemplateChange={pickTemplate}
         />
       </Drawer>
+      {sourceTarget && (
+        <JobSourceDialog
+          jobId={sourceTarget.id}
+          open={!!sourceTarget}
+          onClose={() => setSourceTarget(undefined)}
+          initialTab={sourceTarget.tab}
+        />
+      )}
     </section>
   );
 }

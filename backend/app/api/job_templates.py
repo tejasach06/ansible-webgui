@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.services.audit import audit
 from app.services.rbac_scope import assert_project_perm, inventory_visible_to_project, visible_project_ids
 from app.services.surveys import validate_survey_spec
+from app.services.credential_slots import SLOT_LABEL, find_slot_conflict
 
 
 def survey_error(code: str) -> HTTPException:
@@ -17,12 +18,16 @@ def survey_error(code: str) -> HTTPException:
 
 router = APIRouter(prefix="/api/job_templates", tags=["job_templates"])
 
-async def _reject_credential_user_conflict(db: AsyncSession, credential_ids: list[int]) -> None:
+async def _validate_credential_set(db: AsyncSession, credential_ids: list[int]) -> None:
     if credential_ids:
-        rows = (await db.execute(select(Credential.name, Credential.username).where(Credential.id.in_(credential_ids), Credential.username.isnot(None)))).all()
-        if len({username for _, username in rows}) > 1:
-            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set different usernames", "credentials": [name for name, _ in rows]})
-
+        rows = (await db.execute(select(Credential.name, Credential.username, Credential.kind).where(Credential.id.in_(credential_ids)))).all()
+        user_rows = [(name, username) for name, username, _ in rows if username is not None]
+        if len({username for _, username in user_rows}) > 1:
+            raise HTTPException(status_code=422, detail={"code": "credential_user_conflict", "message": "Multiple selected credentials set different usernames", "credentials": [name for name, _ in user_rows]})
+        conflict = find_slot_conflict([(name, kind) for name, _, kind in rows])
+        if conflict:
+            slot, names = conflict
+            raise HTTPException(status_code=422, detail={"code": "credential_slot_conflict", "message": f"Select at most one {SLOT_LABEL[slot]} credential", "slot": slot, "credentials": names})
 
 class JobTemplateCreate(BaseModel):
     project_id: int
@@ -122,7 +127,7 @@ async def create_template(
     db: AsyncSession = Depends(get_db)
 ):
     await assert_project_perm(db, user, req.project_id, "content.write")
-    await _reject_credential_user_conflict(db, req.credential_ids)
+    await _validate_credential_set(db, req.credential_ids)
     if req.inventory_id is not None:
         inv = (await db.execute(select(Inventory).where(Inventory.id == req.inventory_id))).scalar_one_or_none()
         if not inv:
@@ -153,7 +158,7 @@ async def update_template(
     await assert_project_perm(db, user, t.project_id, "content.write")
     data = req.model_dump(exclude_unset=True)
     if "credential_ids" in data:
-        await _reject_credential_user_conflict(db, data["credential_ids"])
+        await _validate_credential_set(db, data["credential_ids"])
     if "inventory_id" in data:
         if data["inventory_id"] == 0:
             data["inventory_id"] = None

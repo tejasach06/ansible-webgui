@@ -8,7 +8,7 @@ import { Dialog } from "./Dialog";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
 import { Select } from "./Field";
-import { buildLaunchBody, init, JobLaunchForm, type LaunchForm } from "./JobLaunchForm";
+import { buildLaunchBody, init, JobLaunchForm, writeSlotMemory, type LaunchForm } from "./JobLaunchForm";
 import { useAuth } from "../lib/auth";
 import { useToast } from "./Toast";
 
@@ -61,6 +61,7 @@ export function RunJobDialog({ open, onClose, playbookId, projectId, extraVarsTe
     }
     launch.mutate(body, {
       onSuccess: (job) => {
+        if (projectId) writeSlotMemory(projectId, form.credential_ids);
         toast(`Job #${job.id} ${job.status}`);
         close();
         nav(`/jobs/${job.id}`);

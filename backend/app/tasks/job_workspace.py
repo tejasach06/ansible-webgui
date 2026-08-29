@@ -7,6 +7,7 @@ from git import Repo
 from app.core.config import settings
 from app.db.models import Credential
 from app.services.credentials import decrypt_payload
+from app.services.credential_slots import find_slot_conflict
 
 
 def export_project_snapshot(project_name: str, temp_dir: str, git_sha: str | None) -> str:
@@ -76,6 +77,9 @@ def materialize_credentials(db, temp_dir: str, credential_ids: list[int], snapsh
 
     if credential_ids:
         creds = db.query(Credential).filter(Credential.id.in_(credential_ids)).all()
+        conflict = find_slot_conflict([(c.name, c.kind) for c in creds])
+        if conflict:
+            raise RuntimeError(f"credential_slot_conflict:{conflict[0]}:{','.join(conflict[1])}")
         for c in creds:
             dec = decrypt_payload(c.payload_enc)
             if c.username and user_arg is None:
