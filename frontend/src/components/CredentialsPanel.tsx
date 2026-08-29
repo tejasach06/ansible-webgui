@@ -13,6 +13,7 @@ import { useAuth } from "../lib/auth";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
 import { Section } from "./Section";
+import { PageHeader } from "./PageHeader";
 import { DataTable } from "./DataTable";
 import { Drawer } from "./Drawer";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -21,6 +22,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { EmptyState } from "./EmptyState";
 import { RunJobDialog } from "./RunJobDialog";
 import type { Credential, CredentialKind } from "../lib/types";
+import { KIND_LABEL } from "../lib/credentialSlots";
 
 const kinds: CredentialKind[] = ["ssh_key", "ssh_password", "vault_password", "become_password"];
 
@@ -131,33 +133,56 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
     ? allRows.filter((r) => String(r.project_id) === selectedProjectId)
     : allRows;
 
-  return (
-    <Section
-      title="Credentials"
-      divider={false}
-      actions={
-        canWrite && (
-          <div className="flex gap-2">
-            {!projectId && (
-              <Select id="filter-project" label="Project" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
-                <option value="">All projects</option>
-                {projects.data?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
-            )}
-            <Button variant="secondary" icon={<KeyRound size={16} strokeWidth={1.5} />} onClick={() => setGenOpen(true)}>
-              Generate SSH key
-            </Button>
-            <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={() => setOpen(true)}>
-              Create credential
-            </Button>
-          </div>
-        )
-      }
-    >
+  const writeActions = canWrite && (
+    <div className="flex gap-2">
+      <Button variant="secondary" icon={<KeyRound size={16} strokeWidth={1.5} />} onClick={() => setGenOpen(true)}>
+        Generate SSH key
+      </Button>
+      <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={() => setOpen(true)}>
+        Create credential
+      </Button>
+    </div>
+  );
+
+  const headerActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      {!projectId && (
+        <select
+          id="filter-project"
+          aria-label="Filter by project"
+          value={selectedProjectId}
+          onChange={(e) => setSelectedProjectId(e.target.value)}
+          className="h-9 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        >
+          <option value="">All projects</option>
+          {projects.data?.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {canWrite && (
+        <>
+          <Button variant="secondary" icon={<KeyRound size={16} strokeWidth={1.5} />} onClick={() => setGenOpen(true)}>
+            Generate SSH key
+          </Button>
+          <Button icon={<Plus size={16} strokeWidth={1.5} />} onClick={() => setOpen(true)}>
+            Create credential
+          </Button>
+        </>
+      )}
+    </div>
+  );
+
+  const emptyNode = selectedProjectId && allRows.length ? (
+    <EmptyState>No credentials in {projectName(Number(selectedProjectId))}. Clear the project filter to see all credentials.</EmptyState>
+  ) : (
+    <EmptyState>No credentials yet. Create a credential or generate an SSH key to get started.</EmptyState>
+  );
+
+  const body = (
+    <>
       {(list.error || create.error || generate.error || bootstrap.error || del.error || update.error) && (
         <ErrorBanner error={list.error || create.error || generate.error || bootstrap.error || del.error || update.error} />
       )}
@@ -165,11 +190,11 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
       <DataTable<Credential>
         rows={filteredRows}
         loading={list.isLoading}
-        empty={<EmptyState>No credentials yet.</EmptyState>}
+        empty={emptyNode}
         columns={[
           ...(!projectId ? [{ key: "project", header: "Project", render: (r: Credential) => projectName(r.project_id) }] : []),
           { key: "name", header: "Name", render: (r) => r.name },
-          { key: "kind", header: "Kind", render: (r) => r.kind },
+          { key: "kind", header: "Kind", render: (r) => KIND_LABEL[r.kind] },
           { key: "username", header: "Username", render: (r) => r.username || "-" },
           { key: "created_by", header: "Created by", render: (r) => r.created_by },
           {
@@ -178,7 +203,7 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
             render: (r) => {
               const canEditThis = projectId ? canWrite : canInProject(r.project_id, "credential.write");
               return canEditThis ? (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {r.kind === "ssh_key" && (
                     <>
                       <Button
@@ -273,7 +298,7 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
           >
             {kinds.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {KIND_LABEL[k]}
               </option>
             ))}
           </Select>
@@ -360,11 +385,11 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
         }
       >
         <div className="grid gap-3">
-          <div className="text-sm text-zinc-600 dark:text-zinc-400">
+          <div className="text-sm text-fg-muted">
             Paste into <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs dark:bg-zinc-800">~/.ssh/authorized_keys</code> on your managed hosts, or use Deploy key to install it automatically.
           </div>
           {viewKey?.public_key ? (
-            <pre className="overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs whitespace-pre-wrap break-all text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+            <pre className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs whitespace-pre-wrap break-all text-fg dark:border-zinc-800 dark:bg-zinc-900">
               {viewKey.public_key}
             </pre>
           ) : (
@@ -392,9 +417,11 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
         <div className="grid gap-3">
           <TextInput ref={editFirst} id="edit-credential-name" label="Name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
           <TextInput id="edit-credential-username" label="Username" value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} />
-          <div className="text-sm">
+          <div className="grid gap-1 text-sm">
             <span className="font-medium">Kind</span>
-            <div className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">{edit?.kind}</div>
+            <div className="rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-fg-muted dark:border-zinc-700 dark:bg-zinc-950">
+              {edit ? KIND_LABEL[edit.kind] : ""}
+            </div>
           </div>
           <TextArea id="edit-credential-payload" label="Payload (Leave empty to keep existing secret)" value={editForm.payload} onChange={(e) => setEditForm({ ...editForm, payload: e.target.value })} />
           {edit?.kind === "ssh_password" && (
@@ -431,6 +458,25 @@ export function CredentialsPanel({ projectId }: { projectId?: number }) {
         playbookId={deploy?.playbookId}
         extraVarsText={deploy ? JSON.stringify({ webgui_public_key: deploy.publicKey }, null, 2) : undefined}
       />
+    </>
+  );
+
+  if (!projectId) {
+    return (
+      <section className="grid gap-4">
+        <PageHeader
+          title="Credentials"
+          subtitle="Secrets used by job runs — SSH keys, passwords, and vault passwords, scoped per project."
+          actions={headerActions}
+        />
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <Section title="Credentials" divider={false} actions={writeActions}>
+      {body}
     </Section>
   );
 }

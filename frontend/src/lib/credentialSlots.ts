@@ -10,6 +10,13 @@ export const SLOT_LABEL: Record<CredentialSlot, string> = {
   become: "Become (sudo) password",
 };
 
+export const KIND_LABEL: Record<CredentialKind, string> = {
+  ssh_key: "SSH key",
+  ssh_password: "SSH password",
+  vault_password: "Vault password",
+  become_password: "Become (sudo) password",
+};
+
 const KIND_SLOT: Record<CredentialKind, CredentialSlot> = {
   ssh_key: "machine",
   ssh_password: "machine",
