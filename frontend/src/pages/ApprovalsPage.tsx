@@ -5,6 +5,7 @@ import { DataTable } from "../components/DataTable";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { StatusPill } from "../components/StatusPill";
 import { linkClass } from "../lib/cn";
+import { formatTimestamp } from "../lib/time";
 import type { JobListItem } from "../lib/types";
 
 export function ApprovalsPage() {
@@ -23,7 +24,7 @@ export function ApprovalsPage() {
           { key: "status", header: "Status", render: (r) => <StatusPill status={r.status} /> },
           { key: "mode", header: "Mode", render: (r) => r.mode },
           { key: "requested_by", header: "Requested by", render: (r) => r.requested_by },
-          { key: "created_at", header: "Created", render: (r) => r.created_at ?? "-" },
+          { key: "created_at", header: "Created", render: (r) => <span title={r.created_at ?? undefined}>{formatTimestamp(r.created_at)}</span> },
           { key: "review", header: "", render: (r) => <Link className={linkClass} to={`/approvals/${r.id}`}>Review</Link> },
         ]}
       />
