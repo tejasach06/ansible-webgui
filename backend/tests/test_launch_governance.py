@@ -7,6 +7,8 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.models import (
+    Credential,
+    CredentialKind,
     Inventory,
     InventoryFormat,
     JobTemplate,
@@ -146,3 +148,43 @@ async def test_template_default_limit_pattern_applied(client, db, monkeypatch, t
     detail = await client.get(f"/api/jobs/{job_id}")
     assert detail.status_code == 200
     assert detail.json()["params_snapshot"]["limit"] == "web"
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_template_creation_rejects_credential_slot_conflict(client, db, monkeypatch, tmp_path):
+    project, playbook, inventory, _ = await _stack(db, monkeypatch, tmp_path, f"launch-slot-conflict-{uuid4().hex}")
+    admin_user = (await db.execute(select(User).where(User.username == settings.BOOTSTRAP_ADMIN_USER))).unique().scalar_one()
+
+    c1 = Credential(
+        project_id=project.id,
+        name=f"cred1-{uuid4().hex[:6]}",
+        kind=CredentialKind.ssh_key,
+        payload_enc=b"enc1",
+        created_by=admin_user.id,
+    )
+    c2 = Credential(
+        project_id=project.id,
+        name=f"cred2-{uuid4().hex[:6]}",
+        kind=CredentialKind.ssh_password,
+        payload_enc=b"enc2",
+        created_by=admin_user.id,
+    )
+    db.add_all([c1, c2])
+    await db.commit()
+    await db.refresh(c1)
+    await db.refresh(c2)
+
+    await _login(client)
+    res = await client.post(
+        "/api/job_templates",
+        headers=MUTATE,
+        json={
+            "project_id": project.id,
+            "playbook_id": playbook.id,
+            "name": f"tmpl-{uuid4().hex[:6]}",
+            "credential_ids": [c1.id, c2.id],
+        },
+    )
+    assert res.status_code == 422
+    data = res.json()
+    assert data["detail"]["code"] == "credential_slot_conflict"
+    assert data["detail"]["slot"] == "machine"

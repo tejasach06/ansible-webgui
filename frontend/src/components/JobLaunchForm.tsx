@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type Ref, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type Ref, type SetStateAction } from "react";
 import { useCredentials } from "../api/credentials";
 import { useCreateInventories, useInventories } from "../api/inventories";
 import { usePlaybooks } from "../api/playbooks";
@@ -11,6 +11,32 @@ import { ErrorBanner } from "./ErrorBanner";
 import { Checkbox, NumberInput, Select, TextArea, TextInput } from "./Field";
 import { useToast } from "./Toast";
 import { buildInventory } from "./InventoryHostsWizard";
+import { fromSlots, toSlots } from "../lib/credentialSlots";
+import { CredentialSlots } from "./CredentialSlots";
+
+const slotMemoryKey = (projectId: number) => `awg.credSlots.v1.${projectId}`;
+
+export function readSlotMemory(projectId: number): number[] {
+  try {
+    const raw = localStorage.getItem(slotMemoryKey(projectId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "number")) {
+      return parsed;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeSlotMemory(projectId: number, ids: number[]): void {
+  try {
+    localStorage.setItem(slotMemoryKey(projectId), JSON.stringify(ids));
+  } catch {
+    // localStorage quota/private mode errors must not break launch
+  }
+}
 
 const inventoryStarters: Record<InventoryFormat, string> = { yaml: buildInventory({ format: "yaml", group: "all", hosts: ["host1.example.com"] }), ini: buildInventory({ format: "ini", group: "all", hosts: ["host1.example.com"] }) };
 function freshNewInventory() { return { name: "", filename: "", format: "yaml" as InventoryFormat, content: inventoryStarters.yaml }; }
@@ -51,6 +77,23 @@ export function JobLaunchForm({ form, setForm, extraError, setExtraError, lockPl
   const launchProjectId = selectedPlaybook?.project_id ?? selectedTemplate?.project_id;
   const inventories = useInventories();
   const credentials = useCredentials(launchProjectId);
+  const memoryAppliedProjectRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (
+      launchProjectId &&
+      !selectedTemplate &&
+      form.credential_ids.length === 0 &&
+      credentials.data &&
+      memoryAppliedProjectRef.current !== launchProjectId
+    ) {
+      memoryAppliedProjectRef.current = launchProjectId;
+      const remembered = fromSlots(toSlots(credentials.data, readSlotMemory(launchProjectId)));
+      if (remembered.length > 0) {
+        setForm((f) => ({ ...f, credential_ids: remembered }));
+      }
+    }
+  }, [launchProjectId, selectedTemplate, form.credential_ids.length, credentials.data, setForm]);
   const createInventory = useCreateInventories();
   const [newInventoryOpen, setNewInventoryOpen] = useState(false);
   const [newInventory, setNewInventory] = useState(freshNewInventory);
@@ -114,23 +157,15 @@ export function JobLaunchForm({ form, setForm, extraError, setExtraError, lockPl
     <div className="grid gap-1">
       <span className="text-sm font-medium">Credentials</span>
       {launchProjectId ? (
-        credentials.data?.map((c) => (
-          <Checkbox
-            key={c.id}
-            id={`job-cred-${c.id}`}
-            label={`${c.name} — ${c.kind}${c.username ? ` (user: ${c.username})` : ""}`}
-            checked={form.credential_ids.includes(c.id)}
-            disabled={locked(selectedTemplate?.ask_credentials)}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                credential_ids: e.target.checked
-                  ? [...form.credential_ids, c.id]
-                  : form.credential_ids.filter((id) => id !== c.id),
-              })
-            }
-          />
-        ))
+        <CredentialSlots
+          credentials={credentials.data}
+          value={form.credential_ids}
+          onChange={(ids) => setForm({ ...form, credential_ids: ids })}
+          disabled={locked(selectedTemplate?.ask_credentials)}
+          idPrefix="job-cred"
+          autoSelectMachine
+          emptyCta
+        />
       ) : (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">Select a playbook to choose credentials.</p>
       )}

@@ -38,7 +38,30 @@ async def list_jobs(
     total = (await db.execute(select(func.count(JobRun.id)).where(*filters))).scalar_one()
     query = select(JobRun).where(*filters).order_by(JobRun.created_at.desc()).offset(offset).limit(min(limit, 200))
     jobs = (await db.execute(query)).scalars().all()
-    items = [{"id": j.id, "template_id": j.template_id, "playbook_id": j.playbook_id, "inventory_id": j.inventory_id, "mode": j.mode, "status": j.status, "requested_by": j.requested_by, "approved_by": j.approved_by, "created_at": j.created_at.isoformat() if j.created_at else None, "finished_at": j.finished_at.isoformat() if j.finished_at else None} for j in jobs]
+    pb_ids = list({j.playbook_id for j in jobs if j.playbook_id})
+    inv_ids = list({j.inventory_id for j in jobs if j.inventory_id})
+    pbs = {p.id: p for p in (await db.execute(select(Playbook).where(Playbook.id.in_(pb_ids)))).scalars().all()} if pb_ids else {}
+    invs = {i.id: i for i in (await db.execute(select(Inventory).where(Inventory.id.in_(inv_ids)))).scalars().all()} if inv_ids else {}
+    items = []
+    for j in jobs:
+        pb = pbs.get(j.playbook_id)
+        inv = invs.get(j.inventory_id)
+        items.append({
+            "id": j.id,
+            "template_id": j.template_id,
+            "playbook_id": j.playbook_id,
+            "playbook_name": pb.name if pb else None,
+            "playbook_rel_path": pb.rel_path if pb else None,
+            "inventory_id": j.inventory_id,
+            "inventory_name": inv.name if inv else None,
+            "inventory_rel_path": inv.rel_path if inv else None,
+            "mode": j.mode,
+            "status": j.status,
+            "requested_by": j.requested_by,
+            "approved_by": j.approved_by,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+        })
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 

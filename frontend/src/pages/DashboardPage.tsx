@@ -1,15 +1,15 @@
 import { Link } from "react-router-dom";
 import { useJobAction, useJobSummary } from "../api/jobs";
+import { Button } from "../components/Button";
 import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
-import { StatusPill } from "../components/StatusPill";
-import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
+import { StatusPill } from "../components/StatusPill";
 import { useAuth } from "../lib/auth";
 import { linkClass } from "../lib/cn";
+import { formatTimestamp } from "../lib/time";
 import type { JobListItem } from "../lib/types";
-
 function ApproveButton({ id }: { id: number }) {
   const approve = useJobAction(id, "approve");
   return <Button size="sm" loading={approve.isPending} onClick={() => approve.mutate({ approval_note: "" })}>Approve</Button>;
@@ -47,7 +47,7 @@ export function DashboardPage() {
             { key: "id", header: "Run", render: (r: JobListItem) => <Link className={linkClass} to={`/jobs/${r.id}`}>#{r.id}</Link> },
             { key: "mode", header: "Mode", render: (r) => r.mode },
             { key: "requested", header: "Requested by", render: (r) => r.requested_by },
-            { key: "created", header: "Created", render: (r) => r.created_at },
+            { key: "created", header: "Created", render: (r) => <span title={r.created_at ?? undefined}>{formatTimestamp(r.created_at)}</span> },
             { key: "actions", header: "Actions", render: (r) => canAny("job.approve") && <ApproveButton id={r.id} /> },
           ]}
         />
@@ -61,7 +61,7 @@ export function DashboardPage() {
             { key: "id", header: "Run", render: (r: JobListItem) => <Link className={linkClass} to={`/jobs/${r.id}`}>#{r.id}</Link> },
             { key: "status", header: "Status", render: (r: JobListItem) => <StatusPill status={r.status} /> },
             { key: "mode", header: "Mode", render: (r) => r.mode },
-            { key: "finished", header: "Finished", render: (r) => r.finished_at ?? "-" },
+            { key: "finished", header: "Finished", render: (r: JobListItem) => <span title={r.finished_at ?? undefined}>{formatTimestamp(r.finished_at)}</span> },
           ]}
         />
       </Section>

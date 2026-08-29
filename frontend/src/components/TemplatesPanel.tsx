@@ -5,7 +5,7 @@ import { useProjects } from "../api/projects";
 import { usePlaybooks } from "../api/playbooks";
 import { useInventories } from "../api/inventories";
 import { useCredentials } from "../api/credentials";
-import { parseExtra, type Credential, type JobTemplate, type SurveyField } from "../lib/types";
+import { parseExtra, type JobTemplate, type SurveyField } from "../lib/types";
 import { useToast } from "./Toast";
 import { Button } from "./Button";
 import { Section } from "./Section";
@@ -13,6 +13,7 @@ import { Drawer } from "./Drawer";
 import { DataTable } from "./DataTable";
 import { TextArea, TextInput, Checkbox, Select, NumberInput } from "./Field";
 import { ErrorBanner } from "./ErrorBanner";
+import { CredentialSlots } from "./CredentialSlots";
 
 const init = {
   name: "",
@@ -247,22 +248,12 @@ export function TemplatesPanel({ projectId }: { projectId?: number }) {
 
           <div className="space-y-2">
             <label className="block text-xs font-medium">Credentials</label>
-            <div className="grid gap-1">
-              {(credentials.data || []).map((c: Credential) => (
-                <Checkbox
-                  key={c.id}
-                  id={`cred-${c.id}`}
-                  label={`${c.name} — ${c.kind}${c.username ? ` (user: ${c.username})` : ""}`}
-                  checked={form.credential_ids.includes(c.id)}
-                  onChange={(e) => {
-                    const next = e.target.checked
-                      ? [...form.credential_ids, c.id]
-                      : form.credential_ids.filter((id) => id !== c.id);
-                    setForm({ ...form, credential_ids: next });
-                  }}
-                />
-              ))}
-            </div>
+            <CredentialSlots
+              credentials={credentials.data}
+              value={form.credential_ids}
+              onChange={(ids) => setForm({ ...form, credential_ids: ids })}
+              idPrefix="cred"
+            />
           </div>
 
           <Checkbox id="template-approval" label="Requires approval" checked={form.requires_approval} onChange={(e) => setForm({ ...form, requires_approval: e.target.checked })} />
