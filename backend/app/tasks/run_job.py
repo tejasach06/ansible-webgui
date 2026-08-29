@@ -153,6 +153,11 @@ def run_job(job_run_id: int):
             from app.tasks.notify import send_notification
             send_notification.delay("job_finished", {"event": "job_finished", "job_id": job.id, "status": job.status.value, "mode": job.mode.value, "template_id": job.template_id, "playbook_id": job.playbook_id, "rc": job.rc, "stats": job.stats, "url": None})
 
+        except Exception:
+            job.status = JobStatus.failed
+            job.finished_at = utcnow()
+            db.commit()
+            raise
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
